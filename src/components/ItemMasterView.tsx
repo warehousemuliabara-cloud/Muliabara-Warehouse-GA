@@ -1,0 +1,1086 @@
+import React, { useState } from 'react';
+import { 
+  Package, 
+  Search, 
+  Filter, 
+  Plus, 
+  PlusCircle,
+  Edit3, 
+  Trash2, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Layers, 
+  Printer,
+  FileSpreadsheet,
+  ArrowUpDown,
+  MapPin,
+  Upload,
+  Download,
+  RotateCcw,
+  ShieldAlert,
+  Crown,
+  Building2,
+  Sparkles
+} from 'lucide-react';
+import { Item, Category, UserAccount, UserRole, UserPermissions } from '../types';
+import { CATEGORIES, UNITS, INITIAL_ITEMS } from '../data/initialData';
+import { BarcodeRenderer } from './BarcodeRenderer';
+import { detectCategoryFromName, generateCategorySKU } from '../utils/helpers';
+import { ImportExportModal } from './ImportExportModal';
+import { ConfirmationModal } from './ConfirmationModal';
+
+const WAREHOUSE_LOCATIONS = ['Gudang GA', 'Gudang Kayu'] as const;
+
+interface ItemMasterViewProps {
+  items: Item[];
+  currentUser: UserAccount;
+  rolePermissions?: Record<UserRole, UserPermissions>;
+  onAddItem: (newItem: Item) => void;
+  onBulkAddItems?: (newItems: Item[], mode: 'append' | 'replace') => void;
+  onUpdateItem: (updatedItem: Item) => void;
+  onDeleteItem: (itemId: string) => void;
+  onClearAllStock?: () => void;
+  onDeleteAllStockItems?: () => void;
+  onScanItemForRequest: (item: Item) => void;
+  onOpenPrintSheet: () => void;
+}
+
+export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
+  items,
+  currentUser,
+  rolePermissions,
+  onAddItem,
+  onBulkAddItems,
+  onUpdateItem,
+  onDeleteItem,
+  onClearAllStock,
+  onDeleteAllStockItems,
+  onScanItemForRequest,
+  onOpenPrintSheet,
+}) => {
+  // Check role permissions dynamically
+  const currentPerms = rolePermissions?.[currentUser.role] || (currentUser.permissions as UserPermissions) || {
+    canManageMasterStock: currentUser.role !== 'USER_OPERATIONAL',
+    canAddNewItem: currentUser.role === 'MASTER_ADMIN',
+    canEditStockItem: currentUser.role === 'MASTER_ADMIN',
+    canDeleteStockItem: currentUser.role === 'MASTER_ADMIN',
+    canResetStock: currentUser.role === 'MASTER_ADMIN',
+    canPrintBarcodes: true,
+    canExportImportExcel: currentUser.role !== 'USER_OPERATIONAL',
+  };
+
+  const canAdd = currentPerms.canAddNewItem ?? (currentUser.role === 'MASTER_ADMIN');
+  const canEdit = currentPerms.canEditStockItem ?? (currentUser.role === 'MASTER_ADMIN');
+  const canDelete = currentPerms.canDeleteStockItem ?? (currentUser.role === 'MASTER_ADMIN');
+  const canReset = currentPerms.canResetStock ?? (currentUser.role === 'MASTER_ADMIN');
+  const canExportImport = currentPerms.canExportImportExcel ?? (currentUser.role !== 'USER_OPERATIONAL');
+  const canPrint = currentPerms.canPrintBarcodes ?? true;
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [stockFilter, setStockFilter] = useState<'ALL' | 'LOW' | 'IN_STOCK' | 'OUT_OF_STOCK'>('ALL');
+  const [sortBy, setSortBy] = useState<'name' | 'stock' | 'code'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Confirmation Modal states
+  const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
+  const [isConfirmClearStockOpen, setIsConfirmClearStockOpen] = useState(false);
+  const [isConfirmDeleteAllItemsOpen, setIsConfirmDeleteAllItemsOpen] = useState(false);
+
+  // Modal Add / Edit Item
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+
+  // Modal Import / Export Excel & CSV
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Print Label Single Item Modal
+  const [itemToPrint, setItemToPrint] = useState<Item | null>(null);
+
+  // Form states for Add/Edit
+  const [selectedCatalogItem, setSelectedCatalogItem] = useState('');
+  const [formCode, setFormCode] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formCategory, setFormCategory] = useState<Category>(CATEGORIES[0] as Category);
+  const [formUnit, setFormUnit] = useState(UNITS[0]);
+  const [formStock, setFormStock] = useState<number>(0);
+  const [formMinStock, setFormMinStock] = useState<number>(5);
+  const [formRackLocation, setFormRackLocation] = useState<string>('Gudang GA');
+  const [formDescription, setFormDescription] = useState('');
+
+  // Master list of known items
+  const availableDatabaseItems = React.useMemo(() => {
+    const map = new Map<string, Item>();
+    INITIAL_ITEMS.forEach((it) => map.set(it.name.toLowerCase().trim(), it));
+    items.forEach((it) => map.set(it.name.toLowerCase().trim(), it));
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [items]);
+
+  const handleSelectDatabaseItem = (selectedKey: string) => {
+    setSelectedCatalogItem(selectedKey);
+    if (!selectedKey) {
+      setFormName('');
+      setFormCode('');
+      return;
+    }
+
+    if (selectedKey === '__CUSTOM__') {
+      setFormName('');
+      const defaultCat = (CATEGORIES[0] as Category) || 'ATK (Alat Tulis Kantor)';
+      const autoSKU = generateCategorySKU(defaultCat, items);
+      setFormCode(autoSKU);
+      setFormCategory(defaultCat);
+      setFormUnit(UNITS[0]);
+      setFormRackLocation('Gudang GA');
+      setFormMinStock(5);
+      setFormDescription('');
+      setFormStock(0);
+      return;
+    }
+
+    const found = availableDatabaseItems.find(
+      (it) => it.id === selectedKey || it.code === selectedKey || it.name === selectedKey
+    );
+
+    if (found) {
+      setFormName(found.name);
+      setFormCode(found.code);
+      setFormCategory(found.category);
+      setFormUnit(found.unit);
+      
+      // Determine location: Gudang GA or Gudang Kayu
+      const loc = found.rackLocation && found.rackLocation.toLowerCase().includes('kayu')
+        ? 'Gudang Kayu'
+        : 'Gudang GA';
+      setFormRackLocation(loc);
+      setFormMinStock(found.minStock || 5);
+      setFormDescription(found.description || '');
+
+      const existingInItems = items.find(
+        (i) => i.id === found.id || i.code === found.code || i.name.toLowerCase() === found.name.toLowerCase()
+      );
+      if (existingInItems) {
+        setFormStock(existingInItems.currentStock);
+      } else {
+        setFormStock(found.currentStock || 0);
+      }
+    }
+  };
+
+  const handleCustomNameInput = (nameVal: string) => {
+    setFormName(nameVal);
+    if (!nameVal.trim()) return;
+
+    // Auto-detect category based on item name
+    const detectedCat = detectCategoryFromName(nameVal) as Category;
+    setFormCategory(detectedCat);
+
+    // Auto-detect warehouse location: default Gudang Kayu if wood terms, else Gudang GA
+    const lower = nameVal.toLowerCase();
+    if (
+      lower.includes('kayu') ||
+      lower.includes('triplek') ||
+      lower.includes('papan') ||
+      lower.includes('balok') ||
+      lower.includes('usuk') ||
+      lower.includes('reng') ||
+      lower.includes('kaso') ||
+      lower.includes('plywood') ||
+      lower.includes('mdf') ||
+      lower.includes('pallet')
+    ) {
+      setFormRackLocation('Gudang Kayu');
+    }
+
+    // Auto-generate SKU based on category and matching name
+    const sequentialSKU = generateCategorySKU(detectedCat, items, nameVal);
+    setFormCode(sequentialSKU);
+  };
+
+  const handleCategoryChange = (newCat: Category) => {
+    setFormCategory(newCat);
+    // If not editing an existing item, re-generate SKU for this category
+    if (!editingItem) {
+      const newSKU = generateCategorySKU(newCat, items, formName);
+      setFormCode(newSKU);
+    }
+  };
+
+  const openAddModal = () => {
+    setEditingItem(null);
+    setSelectedCatalogItem('');
+    const defaultCat = (CATEGORIES[0] as Category) || 'ATK (Alat Tulis Kantor)';
+    setFormCode(generateCategorySKU(defaultCat, items));
+    setFormName('');
+    setFormCategory(defaultCat);
+    setFormUnit(UNITS[0]);
+    setFormStock(0);
+    setFormMinStock(5);
+    setFormRackLocation('Gudang GA');
+    setFormDescription('');
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (item: Item) => {
+    setEditingItem(item);
+    setSelectedCatalogItem(item.id);
+    setFormCode(item.code);
+    setFormName(item.name);
+    setFormCategory(item.category);
+    setFormUnit(item.unit);
+    setFormStock(item.currentStock);
+    setFormMinStock(item.minStock);
+    const loc = item.rackLocation && item.rackLocation.toLowerCase().includes('kayu')
+      ? 'Gudang Kayu'
+      : 'Gudang GA';
+    setFormRackLocation(loc);
+    setFormDescription(item.description || '');
+    setIsModalOpen(true);
+  };
+
+  const handleSaveForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim() || !formCode.trim()) return;
+
+    const finalLocation = formRackLocation.trim() || 'Gudang GA';
+
+    if (editingItem) {
+      onUpdateItem({
+        ...editingItem,
+        code: formCode.trim().toUpperCase(),
+        name: formName.trim(),
+        category: formCategory,
+        unit: formUnit,
+        currentStock: formStock,
+        minStock: formMinStock,
+        rackLocation: finalLocation,
+        description: formDescription.trim() || undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      const now = new Date().toISOString();
+      onAddItem({
+        id: `item-${Date.now()}`,
+        code: formCode.trim().toUpperCase(),
+        name: formName.trim(),
+        category: formCategory,
+        unit: formUnit,
+        currentStock: formStock,
+        minStock: formMinStock,
+        rackLocation: finalLocation,
+        description: formDescription.trim() || undefined,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    setIsModalOpen(false);
+  };
+
+  // Filter & Search Logic
+  const filteredItems = items.filter((item) => {
+    const matchesSearch =
+      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.rackLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.category.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesCategory = selectedCategory === 'ALL' || item.category === selectedCategory;
+
+    let matchesStock = true;
+    if (stockFilter === 'LOW') {
+      matchesStock = item.currentStock <= item.minStock && item.currentStock > 0;
+    } else if (stockFilter === 'OUT_OF_STOCK') {
+      matchesStock = item.currentStock <= 0;
+    } else if (stockFilter === 'IN_STOCK') {
+      matchesStock = item.currentStock > item.minStock;
+    }
+
+    return matchesSearch && matchesCategory && matchesStock;
+  });
+
+  // Sorting
+  filteredItems.sort((a, b) => {
+    if (sortBy === 'name') {
+      return sortOrder === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+    } else if (sortBy === 'stock') {
+      return sortOrder === 'asc' ? a.currentStock - b.currentStock : b.currentStock - a.currentStock;
+    } else if (sortBy === 'code') {
+      return sortOrder === 'asc' ? a.code.localeCompare(b.code) : b.code.localeCompare(a.code);
+    }
+    return 0;
+  });
+
+  const lowStockCount = items.filter((i) => i.currentStock <= i.minStock).length;
+
+  return (
+    <div className="space-y-4 max-w-7xl mx-auto pb-12">
+      {/* Header Banner */}
+      <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wider bg-[#E8F5E9] text-[#1B5E20] border border-[#A5D6A7] rounded-md">
+              Katalog & Inventory Master
+            </span>
+            <span className="text-xs text-slate-500 font-semibold">Gudang GA</span>
+          </div>
+          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 mt-1 flex items-center gap-2">
+            <span>Master Data Stok & Barcode Barang</span>
+            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-[#E8F5E9] text-[#1B5E20] border border-[#A5D6A7]">
+              {items.length} SKU
+            </span>
+          </h2>
+          <p className="text-xs text-slate-600 mt-0.5">
+            Database seluruh barang operasional dengan nomor barcode SKU, lokasi rak, dan jumlah stok fisik.
+          </p>
+        </div>
+
+        {/* Action Buttons with Compact Glossy Style */}
+        <div className="flex flex-wrap items-center gap-2">
+          {canReset && onClearAllStock && (
+            <button
+              type="button"
+              onClick={() => setIsConfirmClearStockOpen(true)}
+              className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-xl border border-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Kosongkan seluruh stok fisik barang menjadi 0"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+              <span>Reset Stok 0</span>
+            </button>
+          )}
+
+          {canDelete && currentUser.role === 'MASTER_ADMIN' && onDeleteAllStockItems && (
+            <button
+              type="button"
+              onClick={() => setIsConfirmDeleteAllItemsOpen(true)}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-xl border border-rose-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Hapus seluruh database master barang"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-700" />
+              <span>Hapus Semua</span>
+            </button>
+          )}
+
+          {canExportImport && (
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(true)}
+              className="px-3 py-2 bg-[#E8F5E9] hover:bg-[#A5D6A7] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-[#1B5E20]" />
+              <span>Excel / CSV</span>
+            </button>
+          )}
+
+          {canPrint && (
+            <button
+              type="button"
+              onClick={onOpenPrintSheet}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5 text-slate-600" />
+              <span>Cetak Label</span>
+            </button>
+          )}
+
+          {canAdd && (
+            <button
+              type="button"
+              onClick={openAddModal}
+              className="px-4 py-2 bg-[#1B5E20] hover:bg-[#66BB6A] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <PlusCircle className="w-4 h-4 text-[#A5D6A7]" />
+              <span>Tambah Barang Baru</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter & Search Toolbar */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl shadow-xs border border-slate-200/80 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          {/* Search Box */}
+          <div className="relative lg:col-span-2">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari nama barang, barcode (GA-ATK-001), rak..."
+              className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#66BB6A]"
+            />
+          </div>
+
+          {/* Category Filter */}
+          <div>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#66BB6A] text-slate-800 font-medium"
+            >
+              <option value="ALL">Semua Kategori ({items.length})</option>
+              {CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Stock Condition Filter */}
+          <div>
+            <select
+              value={stockFilter}
+              onChange={(e) => setStockFilter(e.target.value as any)}
+              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#66BB6A] text-slate-800 font-medium"
+            >
+              <option value="ALL">Status Stok: Semua</option>
+              <option value="LOW">Stok Menipis ({lowStockCount})</option>
+              <option value="IN_STOCK">Stok Aman</option>
+              <option value="OUT_OF_STOCK">Stok Habis (0)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Quick Filter Badges */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex items-center gap-2 text-slate-600">
+            <span>Menampilkan <b>{filteredItems.length}</b> dari {items.length} barang</span>
+            {lowStockCount > 0 && (
+              <span className="px-2 py-0.5 bg-rose-50 text-rose-800 font-bold rounded-md flex items-center gap-1 border border-rose-200">
+                <AlertTriangle className="w-3 h-3 text-rose-600" />
+                {lowStockCount} item perlu restock
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500 font-medium">Urutkan:</span>
+            <button
+              onClick={() => {
+                if (sortBy === 'name') setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+                else {
+                  setSortBy('name');
+                  setSortOrder('asc');
+                }
+              }}
+              className={`px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
+                sortBy === 'name' ? 'bg-[#E8F5E9] text-[#1B5E20] border border-[#A5D6A7]' : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              Nama {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+            </button>
+            <button
+              onClick={() => {
+                if (sortBy === 'stock') setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+                else {
+                  setSortBy('stock');
+                  setSortOrder('asc');
+                }
+              }}
+              className={`px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 ${
+                sortBy === 'stock' ? 'bg-[#E8F5E9] text-[#1B5E20] border border-[#A5D6A7]' : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              Stok {sortBy === 'stock' && (sortOrder === 'asc' ? '↑' : '↓')}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* RESPONSIVE ITEMS CONTAINER (Requirement 8: No Horizontal Scroll on Mobile) */}
+      
+      {/* 1. Mobile Cards Layout (< md screens) */}
+      <div className="block md:hidden space-y-2.5">
+        {filteredItems.length === 0 ? (
+          <div className="bg-white rounded-2xl p-8 text-center text-slate-500 border border-slate-200">
+            <Package className="w-8 h-8 mx-auto text-slate-300 mb-1" />
+            <p className="font-bold text-xs">Tidak ada barang yang cocok dengan filter</p>
+          </div>
+        ) : (
+          filteredItems.map((item) => {
+            const isLow = item.currentStock <= item.minStock && item.currentStock > 0;
+            const isOut = item.currentStock <= 0;
+
+            return (
+              <div
+                key={item.id}
+                className={`bg-white p-3.5 rounded-2xl border transition-all space-y-2.5 ${
+                  isOut
+                    ? 'border-rose-300 bg-rose-50/20'
+                    : isLow
+                    ? 'border-amber-300 bg-amber-50/20'
+                    : 'border-slate-200/90'
+                }`}
+              >
+                {/* Header row: SKU + Stock Badge (Single row with compact non-breaking text) */}
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1 min-w-0 flex-1">
+                    <span className="font-mono font-bold text-[11px] bg-slate-100 text-[#1B5E20] px-1.5 py-0.5 rounded border border-slate-200 shrink-0">
+                      {item.code}
+                    </span>
+                    <span className="text-[9px] text-slate-600 bg-amber-50/90 text-amber-900 px-1.5 py-0.5 rounded border border-amber-200/80 flex items-center gap-0.5 truncate font-medium">
+                      <MapPin className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                      <span className="truncate">{item.rackLocation || 'Gudang GA'}</span>
+                    </span>
+                  </div>
+
+                  {/* Stock Badge - Compact font to prevent wrapping/cutting off on mobile */}
+                  <div className="shrink-0">
+                    <span
+                      className={`inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-black rounded-lg whitespace-nowrap leading-none ${
+                        isOut
+                          ? 'bg-rose-600 text-white'
+                          : isLow
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-[#E8F5E9] text-[#1B5E20] border border-[#A5D6A7]'
+                      }`}
+                    >
+                      <span>{item.currentStock}</span>
+                      <span className="font-semibold text-[9px] opacity-90">{item.unit}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Name & Category */}
+                <div>
+                  <h4 className="font-bold text-xs text-slate-900 leading-snug">{item.name}</h4>
+                  <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500 flex-wrap">
+                    <span className="bg-slate-100 px-1.5 py-0.2 rounded font-medium text-slate-700">
+                      {item.category}
+                    </span>
+                    <span>Min: {item.minStock} {item.unit}</span>
+                  </div>
+                </div>
+
+                {/* Action Buttons Row with RBAC */}
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                  {canPrint ? (
+                    <button
+                      type="button"
+                      onClick={() => setItemToPrint(item)}
+                      className="text-[11px] font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Cetak Label</span>
+                    </button>
+                  ) : <div />}
+
+                  <div className="flex items-center gap-1.5">
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(item)}
+                        className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                        title="Edit Data Barang"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => setItemToDelete(item)}
+                        className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer"
+                        title="Hapus Barang"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* 2. Desktop Table Layout (>= md screens) */}
+      <div className="hidden md:block bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-900 text-slate-200 uppercase font-bold tracking-wider text-[10px]">
+            <tr>
+              <th className="py-2 px-3">Barcode / SKU</th>
+              <th className="py-2 px-3">Nama Barang & Deskripsi</th>
+              <th className="py-2 px-3">Kategori GA</th>
+              <th className="py-2 px-3 text-center">Lokasi Gudang</th>
+              <th className="py-2 px-3 text-center">Stok Fisik</th>
+              <th className="py-2 px-3 text-center">Min. Stok</th>
+              <th className="py-2 px-3 text-center">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filteredItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-8 text-center text-slate-600">
+                  <Package className="w-8 h-8 mx-auto text-slate-300 mb-1.5" />
+                  <p className="font-semibold text-xs">Tidak ada barang yang cocok dengan filter</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Coba ubah kata kunci pencarian atau kategori</p>
+                </td>
+              </tr>
+            ) : (
+              filteredItems.map((item) => {
+                const isLow = item.currentStock <= item.minStock && item.currentStock > 0;
+                const isOut = item.currentStock <= 0;
+
+                return (
+                  <tr
+                    key={item.id}
+                    className={`hover:bg-slate-50/80 transition-colors ${
+                      isOut ? 'bg-rose-50/30' : isLow ? 'bg-amber-50/30' : ''
+                    }`}
+                  >
+                    {/* Barcode & Code */}
+                    <td className="py-1.5 px-3">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="font-mono font-bold text-[11px] bg-slate-100 text-[#1B5E20] px-1.5 py-0.5 rounded border border-slate-200">
+                          {item.code}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setItemToPrint(item)}
+                          title="Cetak Label Barcode"
+                          className="p-1 text-slate-400 hover:text-[#1B5E20] hover:bg-emerald-50 rounded transition-colors cursor-pointer"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* Name & Description */}
+                    <td className="py-1.5 px-3 max-w-xs">
+                      <p className="font-bold text-slate-900 text-xs leading-tight line-clamp-1">{item.name}</p>
+                      {item.description && (
+                        <p className="text-[10px] text-slate-500 line-clamp-1">{item.description}</p>
+                      )}
+                    </td>
+
+                    {/* Category */}
+                    <td className="py-1.5 px-3">
+                      <span className="inline-block px-2 py-0.5 text-[10px] font-semibold rounded-md bg-slate-100 text-slate-700 whitespace-nowrap">
+                        {item.category}
+                      </span>
+                    </td>
+
+                    {/* Warehouse Location */}
+                    <td className="py-1.5 px-3 text-center">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-medium rounded-md bg-amber-50 text-amber-900 border border-amber-200 whitespace-nowrap">
+                        <Building2 className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                        Gudang GA
+                      </span>
+                    </td>
+
+                    {/* Current Stock */}
+                    <td className="py-1.5 px-3 text-center">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-black rounded-md whitespace-nowrap ${
+                          isOut
+                            ? 'bg-rose-600 text-white'
+                            : isLow
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-[#E8F5E9] text-[#1B5E20] border border-[#A5D6A7]'
+                        }`}
+                      >
+                        <span>{item.currentStock}</span>
+                        <span className="text-[9px] font-semibold opacity-90">{item.unit}</span>
+                      </span>
+                    </td>
+
+                    {/* Min Stock */}
+                    <td className="py-1.5 px-3 text-center font-medium text-slate-600 whitespace-nowrap text-[11px]">
+                      <span>{item.minStock}</span> <span className="text-[9px] text-slate-500">{item.unit}</span>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-1.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(item)}
+                            title="Edit Data Barang"
+                            className="p-1 text-slate-600 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => setItemToDelete(item)}
+                            title="Hapus Barang"
+                            className="p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 rounded-md transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {!canEdit && !canDelete && (
+                          <span className="text-[10px] text-slate-400 font-mono">-</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal Add / Edit Item */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-[#66BB6A]/20 text-[#A5D6A7] rounded-lg border border-[#66BB6A]/30">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">
+                    {editingItem ? 'Edit Data Barang Gudang GA' : 'Tambah / Update Stok Barang'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Pilih nama barang dari database atau ketik barang baru (Kategori & Lokasi otomatis terdeteksi dan dapat disesuaikan).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 p-2 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveForm} className="p-5 overflow-y-auto space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nama Lengkap Barang <span className="text-rose-500">*</span>
+                </label>
+
+                {!editingItem ? (
+                  <div className="space-y-2">
+                    <select
+                      required={selectedCatalogItem !== '__CUSTOM__'}
+                      value={selectedCatalogItem}
+                      onChange={(e) => handleSelectDatabaseItem(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] font-semibold text-slate-800 cursor-pointer"
+                    >
+                      <option value="">-- Klik untuk Pilih Barang dari Database ({availableDatabaseItems.length} Barang) --</option>
+                      {CATEGORIES.map((cat) => {
+                        const catItems = availableDatabaseItems.filter((it) => it.category === cat);
+                        if (catItems.length === 0) return null;
+                        return (
+                          <optgroup key={cat} label={`📂 ${cat} (${catItems.length} item)`}>
+                            {catItems.map((it) => (
+                              <option key={it.id || it.code} value={it.id || it.code}>
+                                {it.name} [{it.code}] ({it.unit})
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                      <option value="__CUSTOM__">➕ Ketik Nama Barang Baru Lainnya (Kustom)...</option>
+                    </select>
+
+                    {selectedCatalogItem === '__CUSTOM__' && (
+                      <input
+                        type="text"
+                        required
+                        value={formName}
+                        onChange={(e) => handleCustomNameInput(e.target.value)}
+                        placeholder="Ketik nama lengkap barang baru (contoh: Kertas F4 75gr, Papan Kayu Meranti)..."
+                        className="w-full px-3 py-2 text-xs bg-white border border-[#66BB6A] rounded-lg focus:ring-2 focus:ring-[#66BB6A] font-semibold text-slate-900"
+                        autoFocus
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    required
+                    value={formName}
+                    onChange={(e) => handleCustomNameInput(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] font-semibold"
+                  />
+                )}
+              </div>
+
+              {/* Editable Kategori GA & Lokasi Gudang */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kategori GA <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={formCategory}
+                    onChange={(e) => handleCategoryChange(e.target.value as Category)}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] font-semibold text-slate-800 cursor-pointer"
+                  >
+                    {CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-600 mt-0.5">
+                    Kategori otomatis menyesuaikan jenis barang dan dapat diedit manual.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Lokasi Gudang <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={formRackLocation}
+                    onChange={(e) => setFormRackLocation(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] font-bold text-slate-800 cursor-pointer"
+                  >
+                    {WAREHOUSE_LOCATIONS.map((loc) => (
+                      <option key={loc} value={loc}>
+                        🏢 {loc}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-600 mt-0.5">
+                    Hanya tersedia 2 lokasi resmi: Gudang GA & Gudang Kayu.
+                  </p>
+                </div>
+              </div>
+
+              {/* Barcode & SKU Box */}
+              <div className="p-3 bg-[#E8F5E9] rounded-xl border border-[#A5D6A7] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#1B5E20] flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-[#66BB6A]" />
+                    Nomor Barcode / Kode SKU Terurut Sesuai Kategori
+                  </span>
+                  <span className="text-[10px] bg-[#1B5E20] text-white font-bold px-2 py-0.5 rounded-full">
+                    Auto-Generate
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-xs">
+                  <div className="bg-white p-2 rounded-lg border border-[#A5D6A7] shadow-2xs">
+                    <span className="text-[10px] font-medium text-slate-500 block">Kode SKU</span>
+                    <input
+                      type="text"
+                      required
+                      value={formCode}
+                      onChange={(e) => setFormCode(e.target.value)}
+                      className="font-mono font-bold text-[#1B5E20] w-full bg-transparent border-b border-transparent focus:border-[#66BB6A] focus:outline-none"
+                    />
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-[#A5D6A7] shadow-2xs">
+                    <span className="text-[10px] font-medium text-slate-500 block">Kategori Terpilih</span>
+                    <span className="font-bold text-slate-800 truncate block">{formCategory || '-'}</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-[#A5D6A7] shadow-2xs">
+                    <span className="text-[10px] font-medium text-slate-500 block">Lokasi Gudang</span>
+                    <span className="font-bold text-slate-800 truncate block">{formRackLocation || 'Gudang GA'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Jumlah Stok Fisik <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={formStock}
+                    onChange={(e) => setFormStock(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-full px-3 py-2 text-sm font-bold text-center bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Satuan Unit
+                  </label>
+                  <select
+                    value={formUnit}
+                    onChange={(e) => setFormUnit(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#66BB6A] font-medium"
+                  >
+                    {UNITS.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Batas Min. Stok (Alert)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={formMinStock}
+                    onChange={(e) => setFormMinStock(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-full px-3 py-2 text-xs font-bold text-center bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#66BB6A] text-amber-700"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Deskripsi / Catatan Barang
+                </label>
+                <textarea
+                  rows={2}
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  placeholder="Keterangan spesifikasi..."
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A]"
+                />
+              </div>
+
+              {formCode && (
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-600">Pratinjau Barcode:</span>
+                  <BarcodeRenderer value={formCode} height={30} width={1.4} fontSize={10} />
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={!formName.trim()}
+                  className="px-5 py-2 bg-[#1B5E20] hover:bg-[#66BB6A] disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer transition-colors"
+                >
+                  {editingItem ? 'Simpan Perubahan' : 'Simpan ke Master Stok'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Single Item Barcode Detail & Print */}
+      {itemToPrint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+              <h3 className="font-bold text-sm">Label Barcode Barang Gudang GA</h3>
+              <button
+                onClick={() => setItemToPrint(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 text-center space-y-3">
+              <div className="p-4 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 flex flex-col items-center">
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                  PROPERTY OF GENERAL AFFAIRS
+                </p>
+                <h4 className="font-bold text-slate-900 text-sm max-w-xs">{itemToPrint.name}</h4>
+                <p className="text-xs text-slate-600 mt-0.5">Lokasi: {itemToPrint.rackLocation}</p>
+                <div className="my-2.5 py-2 px-3 bg-white rounded-lg border border-slate-200 shadow-xs">
+                  <BarcodeRenderer value={itemToPrint.code} width={1.8} height={45} fontSize={12} />
+                </div>
+                <p className="text-[10px] font-mono text-slate-600">
+                  Kategori: {itemToPrint.category} • Satuan: {itemToPrint.unit}
+                </p>
+              </div>
+
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.print();
+                  }}
+                  className="w-full px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Cetak Label Barcode
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import / Export Excel & CSV Modal */}
+      <ImportExportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        items={items}
+        onImportItems={(newItems, mode) => {
+          if (onBulkAddItems) {
+            onBulkAddItems(newItems, mode);
+          } else {
+            newItems.forEach(onAddItem);
+          }
+        }}
+      />
+
+      {/* Delete Single Item Modal */}
+      <ConfirmationModal
+        isOpen={Boolean(itemToDelete)}
+        title="Hapus Barang dari Master Stok"
+        message={`Apakah Anda yakin ingin menghapus data "${itemToDelete?.name}" (${itemToDelete?.code})?`}
+        confirmText="Ya, Hapus Barang"
+        isDestructive={true}
+        onConfirm={() => {
+          if (itemToDelete) {
+            onDeleteItem(itemToDelete.id);
+            setItemToDelete(null);
+          }
+        }}
+        onCancel={() => setItemToDelete(null)}
+      />
+
+      {/* Clear All Stock Modal */}
+      <ConfirmationModal
+        isOpen={isConfirmClearStockOpen}
+        title="Kosongkan Seluruh Stok Barang (Reset Qty 0)"
+        message="Tindakan ini akan mereset seluruh jumlah fisik barang di gudang menjadi 0. Anda yakin?"
+        confirmText="Ya, Kosongkan Stok Menjadi 0"
+        isDestructive={true}
+        onConfirm={() => {
+          if (onClearAllStock) {
+            onClearAllStock();
+          }
+          setIsConfirmClearStockOpen(false);
+        }}
+        onCancel={() => setIsConfirmClearStockOpen(false)}
+      />
+
+      {/* Delete All Stock Items Modal */}
+      <ConfirmationModal
+        isOpen={isConfirmDeleteAllItemsOpen}
+        title="Hapus Seluruh Data Master Barang (Reset Total)"
+        message="PERINGATAN MASTER ADMIN: Seluruh data master barang akan dihapus bersih dari database. Anda yakin?"
+        confirmText="Ya, Hapus Bersih Semua Barang"
+        isDestructive={true}
+        onConfirm={() => {
+          if (onDeleteAllStockItems) {
+            onDeleteAllStockItems();
+          }
+          setIsConfirmDeleteAllItemsOpen(false);
+        }}
+        onCancel={() => setIsConfirmDeleteAllItemsOpen(false)}
+      />
+    </div>
+  );
+};
