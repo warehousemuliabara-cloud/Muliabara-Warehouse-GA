@@ -60,7 +60,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
   const [itemSearchKeyword, setItemSearchKeyword] = useState<string>('');
   const [isItemDropdownOpen, setIsItemDropdownOpen] = useState<boolean>(false);
   const itemDropdownRef = useRef<HTMLDivElement>(null);
-  const [tempQty, setTempQty] = useState<number>(10);
+  const [tempQty, setTempQty] = useState<string>('');
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -114,8 +114,9 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
     const item = items.find((i) => i.id === selectedItemId);
     if (!item) return;
 
-    if (tempQty <= 0) {
-      setErrorMessage('Jumlah barang masuk minimal 1');
+    const parsedQty = parseInt(tempQty.trim(), 10);
+    if (!tempQty.trim() || isNaN(parsedQty) || parsedQty <= 0) {
+      setErrorMessage('Silakan ketik jumlah barang masuk yang valid (minimal 1)');
       return;
     }
 
@@ -125,7 +126,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
         const updated = [...prev];
         updated[existingIndex] = {
           ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + tempQty,
+          quantity: updated[existingIndex].quantity + parsedQty,
         };
         return updated;
       } else {
@@ -136,7 +137,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
             itemCode: item.code,
             itemName: item.name,
             unit: item.unit,
-            quantity: tempQty,
+            quantity: parsedQty,
             currentStock: item.currentStock,
           },
         ];
@@ -145,7 +146,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
 
     setSelectedItemId('');
     setItemSearchKeyword('');
-    setTempQty(10);
+    setTempQty('');
   };
 
   const handleUpdateQuantity = (itemId: string, newQty: number) => {
@@ -465,11 +466,16 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
                     Jumlah Masuk:
                   </label>
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={tempQty}
-                    onChange={(e) => setTempQty(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full px-2.5 py-2 text-xs text-center font-bold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A]"
+                    onChange={(e) => {
+                      const cleanVal = e.target.value.replace(/[^0-9]/g, '');
+                      setTempQty(cleanVal);
+                    }}
+                    placeholder="Contoh: 10"
+                    className="w-full px-2.5 py-2 text-xs text-center font-bold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] text-slate-900 placeholder:text-slate-400"
                   />
                 </div>
 

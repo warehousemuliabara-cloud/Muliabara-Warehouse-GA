@@ -84,6 +84,7 @@ import {
   SyncState,
   WarehouseSyncPayload 
 } from './utils/firebaseSync';
+import { playNotificationChime, triggerBrowserNotification } from './utils/helpers';
 
 const STORAGE_KEY_ITEMS = 'ga_warehouse_items_v8';
 const STORAGE_KEY_TRANSACTIONS = 'ga_warehouse_transactions_v8';
@@ -323,11 +324,21 @@ export default function App() {
     });
   };
 
-  // Manual refresh from Cloud button handler (Direct authoritative fetch)
+  // Manual refresh from Cloud button handler (Bidirectional smart merge so nothing is ever lost)
   const handleManualRefreshCloud = async () => {
     showToast('Menghubungkan & menyinkronkan data Cloud Firestore...', 'info');
     try {
-      const cloudData = await fetchFreshWarehouseData();
+      const current = latestStateRef.current;
+      const cloudData = await fetchFreshWarehouseData({
+        items: current.items,
+        transactions: current.transactions,
+        employees: current.employees,
+        users: current.users,
+        loans: current.loans,
+        auditLogs: current.auditLogs,
+        rolePermissions: current.rolePermissions,
+        dashboardConfig: current.dashboardConfig,
+      });
       if (cloudData) {
         if (Array.isArray(cloudData.items)) setItems(cloudData.items);
         if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
@@ -339,7 +350,7 @@ export default function App() {
         if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
         isInitialCloudLoaded.current = true;
         showToast(
-          `Sinkronisasi Cloud berhasil! ${cloudData.transactions?.length || 0} transaksi & ${cloudData.items?.length || 0} barang tersinkronisasi.`,
+          `Sinkronisasi Cloud berhasil! ${cloudData.transactions?.length || 0} transaksi & ${cloudData.items?.length || 0} barang tersinkronisasi aman.`,
           'success'
         );
       } else {
@@ -373,10 +384,20 @@ export default function App() {
       }
     });
 
-    // Initial cloud fetch on startup to establish connection & pull latest cloud transactions
+    // Initial cloud fetch on startup to establish connection & pull/merge latest cloud transactions
     const initStartupSync = async () => {
       try {
-        const cloudData = await fetchFreshWarehouseData();
+        const current = latestStateRef.current;
+        const cloudData = await fetchFreshWarehouseData({
+          items: current.items,
+          transactions: current.transactions,
+          employees: current.employees,
+          users: current.users,
+          loans: current.loans,
+          auditLogs: current.auditLogs,
+          rolePermissions: current.rolePermissions,
+          dashboardConfig: current.dashboardConfig,
+        });
         if (cloudData) {
           if (Array.isArray(cloudData.items)) setItems(cloudData.items);
           if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
@@ -399,18 +420,48 @@ export default function App() {
     };
   }, []);
 
-  // 2. Subscribe to real-time Firestore database updates across all devices
+  // 2. Subscribe to real-time Firestore database updates across all devices & laptops
   useEffect(() => {
     const unsubscribe = subscribeToWarehouseData((cloudData) => {
       if (cloudData) {
-        // Detect if there are new pending approval requests
-        const prevPending = latestStateRef.current.transactions.filter(t => t.status === 'PENDING').length;
-        const newPending = (cloudData.transactions || []).filter((t: any) => t.status === 'PENDING').length;
-        
-        if (newPending > prevPending && (latestStateRef.current.currentUser.role === 'ADMIN' || latestStateRef.current.currentUser.role === 'MASTER_ADMIN')) {
-          showToast(`🔔 Notifikasi: Ada ${newPending} transaksi permintaan barang menunggu persetujuan!`, 'info');
+        const prevTrx = latestStateRef.current.transactions || [];
+        const prevTrxIds = new Set(prevTrx.map((t) => t.id || t.transactionNumber));
+        const newTrxList = cloudData.transactions || [];
+
+        // Detect newly created transactions from other devices
+        const newlyAddedTrx = newTrxList.filter(
+          (t: any) => !prevTrxIds.has(t.id || t.transactionNumber)
+        );
+
+        // Detect status changes on existing transactions (e.g. Approved / Rejected)
+        const newlyApprovedTrx = newTrxList.filter((t: any) => {
+          const old = prevTrx.find((p) => (p.id || p.transactionNumber) === (t.id || t.transactionNumber));
+          return old && old.status === 'PENDING' && (t.status === 'APPROVED' || t.status === 'COMPLETED');
+        });
+
+        // If new transactions arrived from another phone/laptop
+        if (newlyAddedTrx.length > 0) {
+          playNotificationChime();
+          const firstNew = newlyAddedTrx[0];
+          const isPending = firstNew.status === 'PENDING';
+          const notifTitle = isPending ? '🔔 Permintaan Barang Baru' : '🔔 Transaksi Barang Baru';
+          const notifBody = `${firstNew.transactionNumber} - ${firstNew.requesterName || firstNew.supplier || 'Petugas'} (${firstNew.department || 'Gudang'})`;
+          
+          triggerBrowserNotification(notifTitle, notifBody);
+          showToast(
+            `${notifTitle}: [${firstNew.transactionNumber}] oleh ${firstNew.requesterName || firstNew.supplier || 'Petugas'}${isPending ? ' menunggu Persetujuan Admin' : ''}`,
+            isPending ? 'info' : 'success'
+          );
+        } else if (newlyApprovedTrx.length > 0) {
+          playNotificationChime();
+          const firstApproved = newlyApprovedTrx[0];
+          const notifTitle = '✅ Permintaan Disetujui';
+          const notifBody = `${firstApproved.transactionNumber} telah disetujui Admin. Siap diserahkan.`;
+          triggerBrowserNotification(notifTitle, notifBody);
+          showToast(`✅ Permintaan [${firstApproved.transactionNumber}] telah disetujui!`, 'success');
         }
 
+        // Unconditionally update all React state so laptop/phone displays fresh data immediately
         if (Array.isArray(cloudData.items)) setItems(cloudData.items);
         if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
         if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);

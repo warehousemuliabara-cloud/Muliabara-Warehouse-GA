@@ -297,6 +297,61 @@ export function playScanBeep(isSuccess: boolean = true) {
   }
 }
 
+// Melodic notification chime for incoming transactions & real-time updates
+export function playNotificationChime() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const now = ctx.currentTime;
+
+    const playTone = (freq: number, start: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.25, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + duration);
+    };
+
+    // 3-note pleasant ascending bell chime (C6 -> E6 -> G6)
+    playTone(1046.50, now, 0.25);
+    playTone(1318.51, now + 0.1, 0.3);
+    playTone(1567.98, now + 0.2, 0.45);
+  } catch (e) {
+    console.warn('Audio notification chime error', e);
+  }
+}
+
+// Request and trigger native browser desktop notification if supported
+export function triggerBrowserNotification(title: string, body: string) {
+  try {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification(title, {
+          body,
+          icon: '/favicon.ico',
+        });
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then((permission) => {
+          if (permission === 'granted') {
+            new Notification(title, {
+              body,
+              icon: '/favicon.ico',
+            });
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Desktop notification error', e);
+  }
+}
+
 export function formatRupiah(amount?: number): string {
   if (amount === undefined || isNaN(amount)) return 'Rp 0';
   return new Intl.NumberFormat('id-ID', {

@@ -114,8 +114,8 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState<Category>(CATEGORIES[0] as Category);
   const [formUnit, setFormUnit] = useState(UNITS[0]);
-  const [formStock, setFormStock] = useState<number>(0);
-  const [formMinStock, setFormMinStock] = useState<number>(5);
+  const [formStock, setFormStock] = useState<number | string>('');
+  const [formMinStock, setFormMinStock] = useState<number | string>('5');
   const [formRackLocation, setFormRackLocation] = useState<string>('Gudang GA');
   const [formDescription, setFormDescription] = useState('');
 
@@ -173,9 +173,9 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
       setFormCategory(defaultCat);
       setFormUnit(UNITS[0]);
       setFormRackLocation('Gudang GA');
-      setFormMinStock(5);
+      setFormMinStock('5');
       setFormDescription('');
-      setFormStock(0);
+      setFormStock('');
       return;
     }
 
@@ -194,16 +194,16 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
         ? 'Gudang Kayu'
         : 'Gudang GA';
       setFormRackLocation(loc);
-      setFormMinStock(found.minStock || 5);
+      setFormMinStock(found.minStock !== undefined ? String(found.minStock) : '5');
       setFormDescription(found.description || '');
 
       const existingInItems = items.find(
         (i) => i.id === found.id || i.code === found.code || i.name.toLowerCase() === found.name.toLowerCase()
       );
       if (existingInItems) {
-        setFormStock(existingInItems.currentStock);
+        setFormStock(String(existingInItems.currentStock));
       } else {
-        setFormStock(found.currentStock || 0);
+        setFormStock(found.currentStock !== undefined ? String(found.currentStock) : '');
       }
     }
   };
@@ -255,8 +255,8 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
     setFormName('');
     setFormCategory(defaultCat);
     setFormUnit(UNITS[0]);
-    setFormStock(0);
-    setFormMinStock(5);
+    setFormStock('');
+    setFormMinStock('5');
     setFormRackLocation('Gudang GA');
     setFormDescription('');
     setIsModalOpen(true);
@@ -269,8 +269,8 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
     setFormName(item.name);
     setFormCategory(item.category);
     setFormUnit(item.unit);
-    setFormStock(item.currentStock);
-    setFormMinStock(item.minStock);
+    setFormStock(String(item.currentStock));
+    setFormMinStock(String(item.minStock));
     const loc = item.rackLocation && item.rackLocation.toLowerCase().includes('kayu')
       ? 'Gudang Kayu'
       : 'Gudang GA';
@@ -284,6 +284,8 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
     if (!formName.trim() || !formCode.trim()) return;
 
     const finalLocation = formRackLocation.trim() || 'Gudang GA';
+    const parsedStock = formStock === '' ? 0 : Math.max(0, parseInt(String(formStock), 10) || 0);
+    const parsedMinStock = formMinStock === '' ? 5 : Math.max(0, parseInt(String(formMinStock), 10) || 0);
 
     if (editingItem) {
       onUpdateItem({
@@ -292,8 +294,8 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
         name: formName.trim(),
         category: formCategory,
         unit: formUnit,
-        currentStock: formStock,
-        minStock: formMinStock,
+        currentStock: parsedStock,
+        minStock: parsedMinStock,
         rackLocation: finalLocation,
         description: formDescription.trim() || undefined,
         updatedAt: new Date().toISOString(),
@@ -306,8 +308,8 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
         name: formName.trim(),
         category: formCategory,
         unit: formUnit,
-        currentStock: formStock,
-        minStock: formMinStock,
+        currentStock: parsedStock,
+        minStock: parsedMinStock,
         rackLocation: finalLocation,
         description: formDescription.trim() || undefined,
         createdAt: now,
@@ -1003,12 +1005,17 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                     Jumlah Stok Fisik <span className="text-rose-500">*</span>
                   </label>
                   <input
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
+                    placeholder="Contoh: 10"
                     value={formStock}
-                    onChange={(e) => setFormStock(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-full px-3 py-2 text-sm font-bold text-center bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] text-slate-900"
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(/[^0-9]/g, '');
+                      setFormStock(clean);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-bold text-center bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] text-slate-900 placeholder:text-slate-400"
                   />
                 </div>
 
@@ -1034,12 +1041,17 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                     Batas Min. Stok (Alert)
                   </label>
                   <input
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
+                    placeholder="5"
                     value={formMinStock}
-                    onChange={(e) => setFormMinStock(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-full px-3 py-2 text-xs font-bold text-center bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#66BB6A] text-amber-700"
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(/[^0-9]/g, '');
+                      setFormMinStock(clean);
+                    }}
+                    className="w-full px-3 py-2 text-xs font-bold text-center bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#66BB6A] text-amber-700 placeholder:text-slate-400"
                   />
                 </div>
               </div>

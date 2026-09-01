@@ -82,7 +82,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
   // Requested items list
   const [requestedItems, setRequestedItems] = useState<RequestItemEntry[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string>('');
-  const [tempQty, setTempQty] = useState<number>(1);
+  const [tempQty, setTempQty] = useState<string>('');
   const [itemSearchKeyword, setItemSearchKeyword] = useState('');
   const [isItemDropdownOpen, setIsItemDropdownOpen] = useState(false);
   const itemDropdownRef = useRef<HTMLDivElement>(null);
@@ -208,17 +208,18 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
     }
     const item = items.find((i) => i.id === selectedItemId);
     if (item) {
-      if (tempQty <= 0) {
-        setErrorMessage('Jumlah permintaan minimal 1');
+      const parsedQty = parseInt(tempQty.trim(), 10);
+      if (!tempQty.trim() || isNaN(parsedQty) || parsedQty <= 0) {
+        setErrorMessage('Silakan ketik jumlah permintaan yang valid (minimal 1)');
         return;
       }
-      if (tempQty > item.currentStock) {
-        setErrorMessage(`Jumlah (${tempQty}) melebihi stok tersedia (${item.currentStock} ${item.unit})`);
+      if (parsedQty > item.currentStock) {
+        setErrorMessage(`Jumlah (${parsedQty}) melebihi stok tersedia (${item.currentStock} ${item.unit})`);
         return;
       }
-      addItemToRequest(item, tempQty);
+      addItemToRequest(item, parsedQty);
       setSelectedItemId('');
-      setTempQty(1);
+      setTempQty('');
     }
   };
 
@@ -666,11 +667,16 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                     Jumlah:
                   </label>
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={tempQty}
-                    onChange={(e) => setTempQty(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full px-2.5 py-2 text-xs text-center font-bold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A]"
+                    onChange={(e) => {
+                      const cleanVal = e.target.value.replace(/[^0-9]/g, '');
+                      setTempQty(cleanVal);
+                    }}
+                    placeholder="Contoh: 1"
+                    className="w-full px-2.5 py-2 text-xs text-center font-bold bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] text-slate-900 placeholder:text-slate-400"
                   />
                 </div>
 
