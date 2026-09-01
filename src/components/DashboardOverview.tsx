@@ -123,7 +123,24 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     // 1. Determine timeline window based on filter or available transactions
     const now = new Date();
     
-    if (chartPeriod === 'CUSTOM') {
+    if (chartPeriod === 'THIS_MONTH') {
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+      
+      for (let day = 1; day <= totalDaysInMonth; day++) {
+        const d = new Date(year, month, day);
+        const isoKey = d.toISOString().split('T')[0];
+        const dateLabel = `${day} ${d.toLocaleDateString('id-ID', { month: 'short' })}`;
+        dailyMap[isoKey] = {
+          dateLabel,
+          inQty: 0,
+          outQty: 0,
+          rawDate: isoKey,
+        };
+      }
+    } else if (chartPeriod === 'CUSTOM') {
       const start = new Date(customStartDate);
       const end = new Date(customEndDate);
       if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
@@ -172,7 +189,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         };
       }
     } else {
-      const daysToGenerate = chartPeriod === 'THIS_MONTH' ? 30 : 30;
+      const daysToGenerate = 30;
       for (let i = daysToGenerate - 1; i >= 0; i--) {
         const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
         const isoKey = d.toISOString().split('T')[0];
@@ -684,24 +701,25 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       {/* 3. MAIN SECTION: OPERATION OVERVIEW (LEFT) + MULTI-DIMENSIONAL (RIGHT)    */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        {/* Left 2 Cols: Operation Overview Dual-Wave Chart */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] p-4 sm:p-5 flex flex-col justify-between">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        {/* Left 2 Cols: Operation Overview Dual-Wave Chart (Compact & Slim on Mobile) */}
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] p-3 sm:p-5 flex flex-col justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-2.5">
             <div>
-              <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
-                Ringkasan Operasional (Operation Overview)
+              <h2 className="text-xs sm:text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                <TrendingUp className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Ringkasan Operasional (Operation Overview)</span>
               </h2>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[10.5px] sm:text-[11px] text-slate-500">
                 Tren volume mutasi barang masuk (restock) vs barang keluar (permintaan)
               </p>
             </div>
 
             {/* Time Period Filter Pill (All lowercase as requested) */}
-            <div className="flex items-center flex-wrap gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200/80 text-xs font-semibold">
+            <div className="flex items-center flex-wrap gap-1 bg-slate-50 p-0.5 sm:p-1 rounded-xl border border-slate-200/80 text-[11px] sm:text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => setChartPeriod('THIS_MONTH')}
-                className={`px-2 py-1 rounded-lg transition-all cursor-pointer text-xs ${
+                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
                   chartPeriod === 'THIS_MONTH'
                     ? 'bg-white text-blue-600 shadow-xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -712,7 +730,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <button
                 type="button"
                 onClick={() => setChartPeriod('LAST_30')}
-                className={`px-2 py-1 rounded-lg transition-all cursor-pointer text-xs ${
+                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
                   chartPeriod === 'LAST_30'
                     ? 'bg-white text-blue-600 shadow-xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -723,7 +741,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <button
                 type="button"
                 onClick={() => setChartPeriod('ALL')}
-                className={`px-2 py-1 rounded-lg transition-all cursor-pointer text-xs ${
+                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
                   chartPeriod === 'ALL'
                     ? 'bg-white text-blue-600 shadow-xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -734,7 +752,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <button
                 type="button"
                 onClick={() => setChartPeriod('CUSTOM')}
-                className={`px-2 py-1 rounded-lg transition-all cursor-pointer text-xs flex items-center gap-1 ${
+                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs flex items-center gap-1 ${
                   chartPeriod === 'CUSTOM'
                     ? 'bg-white text-blue-600 shadow-xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -748,36 +766,36 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
           {/* Custom Date Range Picker (Shown when "pilih tanggal" is active, with lowercase labels) */}
           {chartPeriod === 'CUSTOM' && (
-            <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-blue-50/60 border border-blue-100 rounded-xl text-xs flex-wrap animate-in fade-in duration-150">
-              <span className="text-[11px] text-blue-800 font-medium flex items-center gap-1">
+            <div className="flex items-center gap-2 mb-2.5 px-2.5 py-1.5 bg-blue-50/60 border border-blue-100 rounded-xl text-xs flex-wrap animate-in fade-in duration-150">
+              <span className="text-[10.5px] sm:text-[11px] text-blue-800 font-medium flex items-center gap-1">
                 <CalendarDays className="w-3.5 h-3.5 text-blue-600" />
                 rentang tanggal:
               </span>
-              <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2 py-1 rounded-lg shadow-2xs">
-                <span className="text-[10px] text-slate-400 font-mono">dari:</span>
+              <div className="flex items-center gap-1 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-2xs">
+                <span className="text-[9.5px] text-slate-400 font-mono">dari:</span>
                 <input
                   type="date"
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="text-[11px] bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
+                  className="text-[10.5px] bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
                 />
               </div>
-              <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2 py-1 rounded-lg shadow-2xs">
-                <span className="text-[10px] text-slate-400 font-mono">sampai:</span>
+              <div className="flex items-center gap-1 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-2xs">
+                <span className="text-[9.5px] text-slate-400 font-mono">sampai:</span>
                 <input
                   type="date"
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="text-[11px] bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
+                  className="text-[10.5px] bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
                 />
               </div>
             </div>
           )}
 
-          {/* Smooth Dual Spline Curve Area Chart */}
-          <div className="h-64 sm:h-72 w-full pt-2">
+          {/* Smooth Dual Spline Curve Area Chart (Slim on Mobile) */}
+          <div className="h-44 sm:h-64 lg:h-72 w-full pt-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={operationTimeSeriesData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+              <AreaChart data={operationTimeSeriesData} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
                 <defs>
                   {/* Soft Blue Gradient for Inbound/Restock */}
                   <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
@@ -793,13 +811,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 <XAxis 
                   dataKey="dateLabel" 
                   stroke="#94a3b8" 
-                  fontSize={10} 
+                  fontSize={9} 
                   tickLine={false} 
+                  interval="preserveStartEnd"
                   axisLine={{ stroke: '#f1f5f9' }} 
                 />
                 <YAxis 
                   stroke="#94a3b8" 
-                  fontSize={10} 
+                  fontSize={9} 
                   tickLine={false} 
                   axisLine={{ stroke: '#f1f5f9' }} 
                 />
@@ -809,7 +828,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     borderRadius: '12px',
                     boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
                     border: '1px solid #e2e8f0',
-                    fontSize: '12px',
+                    fontSize: '11px',
                     fontWeight: 600,
                   }}
                   formatter={(value: any, name: any) => [
@@ -822,34 +841,34 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   type="monotone" 
                   dataKey="inQty" 
                   stroke="#3b82f6" 
-                  strokeWidth={2.5} 
+                  strokeWidth={2} 
                   fillOpacity={1} 
                   fill="url(#colorInflow)" 
-                  dot={{ r: 2.5, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1.5 }}
-                  activeDot={{ r: 5, fill: '#2563eb', stroke: '#fff', strokeWidth: 2 }}
+                  dot={{ r: 2, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1 }}
+                  activeDot={{ r: 4, fill: '#2563eb', stroke: '#fff', strokeWidth: 1.5 }}
                 />
                 <Area 
                   type="monotone" 
                   dataKey="outQty" 
                   stroke="#10b981" 
-                  strokeWidth={2.5} 
+                  strokeWidth={2} 
                   fillOpacity={1} 
                   fill="url(#colorOutflow)" 
-                  dot={{ r: 2.5, fill: '#10b981', stroke: '#fff', strokeWidth: 1.5 }}
-                  activeDot={{ r: 5, fill: '#059669', stroke: '#fff', strokeWidth: 2 }}
+                  dot={{ r: 2, fill: '#10b981', stroke: '#fff', strokeWidth: 1 }}
+                  activeDot={{ r: 4, fill: '#059669', stroke: '#fff', strokeWidth: 1.5 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
           </div>
 
           {/* Bottom Chart Legend */}
-          <div className="flex items-center justify-center gap-6 pt-3 border-t border-slate-50 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-500" />
+          <div className="flex items-center justify-center gap-4 sm:gap-6 pt-2 sm:pt-3 border-t border-slate-50 text-[10.5px] sm:text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
               <span className="font-bold text-slate-700">Barang Masuk (Inbound)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-emerald-500" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
               <span className="font-bold text-slate-700">Barang Keluar (Permintaan)</span>
             </div>
           </div>

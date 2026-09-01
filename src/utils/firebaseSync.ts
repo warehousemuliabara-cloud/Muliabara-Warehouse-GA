@@ -45,6 +45,11 @@ export const db = firestoreInstance;
 export const WAREHOUSE_DOC_ID = 'warehouse_kbct_main';
 export const WAREHOUSE_COLLECTION = 'warehouses';
 
+// Unique Session ID for this tab/client to prevent self-echo and infinite loops
+export const CLIENT_SESSION_ID = typeof window !== 'undefined'
+  ? `client_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`
+  : 'server_env';
+
 export interface WarehouseSyncPayload {
   items: any[];
   transactions: any[];
@@ -56,6 +61,7 @@ export interface WarehouseSyncPayload {
   dashboardConfig: any;
   lastUpdated: string;
   updatedBy: string;
+  lastWriterId?: string;
 }
 
 export type SyncState = 'connected' | 'syncing' | 'offline' | 'error';
@@ -64,7 +70,7 @@ let currentSyncState: SyncState = 'connected';
 const syncListeners: ((state: SyncState, message?: string) => void)[] = [];
 
 // Cross-tab BroadcastChannel for instant 0ms multi-account & multi-tab synchronization
-const CROSS_TAB_CHANNEL_NAME = 'ga_warehouse_kbct_broadcast_v1';
+const CROSS_TAB_CHANNEL_NAME = 'ga_warehouse_kbct_broadcast_v2';
 let broadcastChannel: BroadcastChannel | null = null;
 if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
   try {
@@ -74,11 +80,16 @@ if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
   }
 }
 
-export function subscribeToCrossTabSync(callback: (payload: Partial<WarehouseSyncPayload>) => void) {
+export function subscribeToCrossTabSync(callback: (payload: WarehouseSyncPayload) => void) {
   if (!broadcastChannel) return () => {};
   
   const handleMessage = (event: MessageEvent) => {
-    if (event.data && event.data.type === 'WAREHOUSE_SYNC_UPDATE' && event.data.payload) {
+    if (
+      event.data && 
+      event.data.type === 'WAREHOUSE_SYNC_UPDATE' && 
+      event.data.payload &&
+      event.data.senderId !== CLIENT_SESSION_ID
+    ) {
       callback(event.data.payload);
     }
   };
@@ -109,180 +120,24 @@ function updateSyncState(state: SyncState, message?: string) {
   });
 }
 
-export function smartMergeWarehouseData(
-  local: Partial<WarehouseSyncPayload>,
-  remote: Partial<WarehouseSyncPayload>
-): WarehouseSyncPayload {
-  // 1. Transactions merge
-  const txMap = new Map<string, any>();
+// Track last applied hash to prevent duplicate re-renders
+let lastAppliedHash = '';
 
-  // Add remote transactions first
-  if (Array.isArray(remote.transactions)) {
-    remote.transactions.forEach((tx) => {
-      if (tx && (tx.id || tx.transactionNumber)) {
-        const key = tx.id || tx.transactionNumber;
-        txMap.set(key, tx);
-      }
-    });
+function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
+  try {
+    const txSummary = (data.transactions || []).map(t => `${t.id || t.transactionNumber}:${t.status}`).join(',');
+    const itemSummary = (data.items || []).map(i => `${i.id || i.code}:${i.currentStock}`).join(',');
+    const empCount = (data.employees || []).length;
+    const userCount = (data.users || []).length;
+    const loanSummary = (data.loans || []).map(l => `${l.id}:${l.status}`).join(',');
+    return `${data.lastUpdated || ''}_${txSummary}_${itemSummary}_${empCount}_${userCount}_${loanSummary}`;
+  } catch {
+    return String(Date.now());
   }
-
-  // Merge with local transactions (never lose local transactions that are not on cloud yet)
-  if (Array.isArray(local.transactions)) {
-    local.transactions.forEach((localTx) => {
-      if (!localTx) return;
-      const key = localTx.id || localTx.transactionNumber;
-      if (!key) return;
-
-      const remoteTx = txMap.get(key);
-      if (!remoteTx) {
-        // Local has a transaction that remote doesn't -> Keep local!
-        txMap.set(key, localTx);
-      } else {
-        // Both have this transaction -> pick the most updated status
-        const statusWeight: Record<string, number> = {
-          COMPLETED: 4,
-          REJECTED: 3,
-          APPROVED: 2,
-          PENDING: 1,
-        };
-        const localWeight = statusWeight[localTx.status] || 0;
-        const remoteWeight = statusWeight[remoteTx.status] || 0;
-
-        if (localWeight > remoteWeight) {
-          txMap.set(key, { ...remoteTx, ...localTx });
-        } else if (remoteWeight > localWeight) {
-          txMap.set(key, { ...localTx, ...remoteTx });
-        } else {
-          // If equal status, prefer newer timestamp
-          const localTime = new Date(localTx.timestamp || localTx.date || 0).getTime();
-          const remoteTime = new Date(remoteTx.timestamp || remoteTx.date || 0).getTime();
-          txMap.set(key, localTime >= remoteTime ? localTx : remoteTx);
-        }
-      }
-    });
-  }
-
-  const mergedTransactions = Array.from(txMap.values()).sort((a, b) => {
-    const timeA = new Date(a.timestamp || a.date || 0).getTime();
-    const timeB = new Date(b.timestamp || b.date || 0).getTime();
-    return timeB - timeA;
-  });
-
-  // 2. Items merge (by ID or code)
-  const itemMap = new Map<string, any>();
-  if (Array.isArray(remote.items)) {
-    remote.items.forEach((item) => {
-      if (item && (item.id || item.code)) {
-        itemMap.set(item.id || item.code, item);
-      }
-    });
-  }
-  if (Array.isArray(local.items)) {
-    local.items.forEach((localItem) => {
-      if (!localItem) return;
-      const key = localItem.id || localItem.code;
-      if (!key) return;
-      const remoteItem = itemMap.get(key);
-      if (!remoteItem) {
-        itemMap.set(key, localItem);
-      } else {
-        const localTime = new Date(localItem.updatedAt || 0).getTime();
-        const remoteTime = new Date(remoteItem.updatedAt || 0).getTime();
-        itemMap.set(key, localTime >= remoteTime ? localItem : remoteItem);
-      }
-    });
-  }
-  const mergedItems = Array.from(itemMap.values());
-
-  // 3. Employees merge
-  const empMap = new Map<string, any>();
-  if (Array.isArray(remote.employees)) {
-    remote.employees.forEach((emp) => {
-      if (emp && (emp.id || emp.name)) empMap.set(emp.id || emp.name, emp);
-    });
-  }
-  if (Array.isArray(local.employees)) {
-    local.employees.forEach((emp) => {
-      if (emp && (emp.id || emp.name)) empMap.set(emp.id || emp.name, emp);
-    });
-  }
-  const mergedEmployees = Array.from(empMap.values());
-
-  // 4. Users merge
-  const userMap = new Map<string, any>();
-  if (Array.isArray(remote.users)) {
-    remote.users.forEach((u) => {
-      if (u && (u.id || u.username)) userMap.set(u.id || u.username, u);
-    });
-  }
-  if (Array.isArray(local.users)) {
-    local.users.forEach((u) => {
-      if (u && (u.id || u.username)) userMap.set(u.id || u.username, u);
-    });
-  }
-  const mergedUsers = Array.from(userMap.values());
-
-  // 5. Loans merge
-  const loanMap = new Map<string, any>();
-  if (Array.isArray(remote.loans)) {
-    remote.loans.forEach((l) => {
-      if (l && l.id) loanMap.set(l.id, l);
-    });
-  }
-  if (Array.isArray(local.loans)) {
-    local.loans.forEach((l) => {
-      if (!l || !l.id) return;
-      const remoteLoan = loanMap.get(l.id);
-      if (!remoteLoan) {
-        loanMap.set(l.id, l);
-      } else {
-        if (l.status === 'RETURNED' || remoteLoan.status !== 'RETURNED') {
-          loanMap.set(l.id, l);
-        }
-      }
-    });
-  }
-  const mergedLoans = Array.from(loanMap.values());
-
-  // 6. Audit logs merge
-  const logMap = new Map<string, any>();
-  if (Array.isArray(remote.auditLogs)) {
-    remote.auditLogs.forEach((log) => {
-      if (log && log.id) logMap.set(log.id, log);
-    });
-  }
-  if (Array.isArray(local.auditLogs)) {
-    local.auditLogs.forEach((log) => {
-      if (log && log.id) logMap.set(log.id, log);
-    });
-  }
-  const mergedAuditLogs = Array.from(logMap.values())
-    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-    .slice(0, 500);
-
-  // 7. Role permissions & Dashboard config
-  const mergedRolePermissions = remote.rolePermissions || local.rolePermissions || {};
-  const mergedDashboardConfig = {
-    ...(local.dashboardConfig || {}),
-    ...(remote.dashboardConfig || {}),
-  };
-
-  return {
-    items: mergedItems,
-    transactions: mergedTransactions,
-    employees: mergedEmployees,
-    users: mergedUsers,
-    loans: mergedLoans,
-    auditLogs: mergedAuditLogs,
-    rolePermissions: mergedRolePermissions,
-    dashboardConfig: mergedDashboardConfig,
-    lastUpdated: new Date().toISOString(),
-    updatedBy: remote.updatedBy || local.updatedBy || 'Sistem',
-  };
 }
 
 /**
- * Direct fetch from Firestore server to get fresh data immediately with smart merge protection
+ * Direct fetch from Firestore server to get fresh authoritative cloud data
  */
 export async function fetchFreshWarehouseData(
   currentLocal?: Partial<WarehouseSyncPayload>
@@ -293,18 +148,8 @@ export async function fetchFreshWarehouseData(
     if (snapshot.exists()) {
       updateSyncState('connected', 'Tersinkronisasi Cloud');
       const cloudData = snapshot.data() as WarehouseSyncPayload;
-      
-      const merged = currentLocal ? smartMergeWarehouseData(currentLocal, cloudData) : cloudData;
-
-      // If local has items/transactions that are not yet on cloud, write merged state back to cloud immediately
-      if (currentLocal && currentLocal.transactions && currentLocal.transactions.length > (cloudData.transactions?.length || 0)) {
-        setDoc(docRef, merged, { merge: true }).catch(console.warn);
-      }
-
-      if (broadcastChannel) {
-        broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload: merged });
-      }
-      return merged;
+      lastAppliedHash = computeDataHash(cloudData);
+      return cloudData;
     } else if (currentLocal) {
       // First time initialization on Cloud
       const initialCloud: WarehouseSyncPayload = {
@@ -318,9 +163,11 @@ export async function fetchFreshWarehouseData(
         dashboardConfig: currentLocal.dashboardConfig || {},
         lastUpdated: new Date().toISOString(),
         updatedBy: currentLocal.updatedBy || 'Sistem',
+        lastWriterId: CLIENT_SESSION_ID,
       };
-      await setDoc(docRef, initialCloud, { merge: true });
+      await setDoc(docRef, initialCloud);
       updateSyncState('connected', 'Tersinkronisasi Cloud');
+      lastAppliedHash = computeDataHash(initialCloud);
       return initialCloud;
     }
     return null;
@@ -331,7 +178,8 @@ export async function fetchFreshWarehouseData(
 }
 
 /**
- * Subscribe to real-time warehouse data changes from Firestore
+ * Subscribe to real-time warehouse data changes from Firestore.
+ * Automatically filters out self-echoes to avoid infinite loops and UI flickering.
  */
 export function subscribeToWarehouseData(
   onData: (data: WarehouseSyncPayload) => void,
@@ -345,11 +193,29 @@ export function subscribeToWarehouseData(
         if (snapshot.exists()) {
           updateSyncState('connected', 'Tersinkronisasi Cloud');
           const data = snapshot.data() as WarehouseSyncPayload;
+
+          // Skip if this change originated from the current tab
+          if (data.lastWriterId === CLIENT_SESSION_ID) {
+            return;
+          }
+
+          // Check if data actually changed to prevent pointless React re-renders
+          const newHash = computeDataHash(data);
+          if (newHash === lastAppliedHash) {
+            return;
+          }
+          lastAppliedHash = newHash;
+
           onData(data);
-          // Broadcast to any other open tabs in the same browser
+
+          // Broadcast to other local tabs
           if (broadcastChannel) {
             try {
-              broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload: data });
+              broadcastChannel.postMessage({
+                type: 'WAREHOUSE_SYNC_UPDATE',
+                payload: data,
+                senderId: CLIENT_SESSION_ID,
+              });
             } catch {
               // safe
             }
@@ -376,80 +242,74 @@ export function subscribeToWarehouseData(
 }
 
 /**
- * Push full updated warehouse snapshot to Firestore with smart-merge protection
+ * Primary sync function: Writes direct authoritative snapshot to Firestore Cloud.
+ * Guarantees that deletions are permanent and changes propagate to all accounts instantly.
  */
 export async function pushWarehouseSync(
-  payload: Partial<WarehouseSyncPayload> & { updatedBy: string }
+  payload: Partial<WarehouseSyncPayload> & { updatedBy?: string }
 ): Promise<WarehouseSyncPayload> {
   const docRef = doc(db, WAREHOUSE_COLLECTION, WAREHOUSE_DOC_ID);
   updateSyncState('syncing', 'Menyimpan ke Cloud...');
 
-  // 1. Broadcast locally first for instant zero-latency UI update across tabs/accounts
+  const finalPayload: WarehouseSyncPayload = {
+    items: payload.items || [],
+    transactions: payload.transactions || [],
+    employees: payload.employees || [],
+    users: payload.users || [],
+    loans: payload.loans || [],
+    auditLogs: payload.auditLogs || [],
+    rolePermissions: payload.rolePermissions || {},
+    dashboardConfig: payload.dashboardConfig || {},
+    lastUpdated: new Date().toISOString(),
+    updatedBy: payload.updatedBy || 'Sistem',
+    lastWriterId: CLIENT_SESSION_ID,
+  };
+
+  lastAppliedHash = computeDataHash(finalPayload);
+
+  // 1. Broadcast to other tabs in the same browser instantly
   if (broadcastChannel) {
     try {
-      broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload });
+      broadcastChannel.postMessage({
+        type: 'WAREHOUSE_SYNC_UPDATE',
+        payload: finalPayload,
+        senderId: CLIENT_SESSION_ID,
+      });
     } catch {
       // safe
     }
   }
 
-  // 2. Fetch existing cloud doc to smart merge before saving
-  let finalPayload: WarehouseSyncPayload;
+  // 2. Persist directly to Firestore Cloud (without resurrecting deleted items)
   try {
-    const currentSnap = await getDoc(docRef);
-    if (currentSnap.exists()) {
-      const cloudData = currentSnap.data() as WarehouseSyncPayload;
-      finalPayload = smartMergeWarehouseData(payload, cloudData);
-    } else {
-      finalPayload = {
-        items: payload.items || [],
-        transactions: payload.transactions || [],
-        employees: payload.employees || [],
-        users: payload.users || [],
-        loans: payload.loans || [],
-        auditLogs: payload.auditLogs || [],
-        rolePermissions: payload.rolePermissions || {},
-        dashboardConfig: payload.dashboardConfig || {},
-        lastUpdated: new Date().toISOString(),
-        updatedBy: payload.updatedBy || 'Sistem',
-      };
-    }
-
-    // 3. Persist to Firestore Cloud
-    await setDoc(docRef, finalPayload, { merge: true });
+    await setDoc(docRef, finalPayload);
     updateSyncState('connected', 'Tersinkronisasi Cloud');
-
-    // 4. Re-broadcast the confirmed merged payload
-    if (broadcastChannel) {
-      try {
-        broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload: finalPayload });
-      } catch {
-        // safe
-      }
-    }
-
     return finalPayload;
   } catch (error: any) {
-    console.warn('pushWarehouseSync direct fallback:', error?.message);
-    const fallbackPayload: WarehouseSyncPayload = {
-      items: payload.items || [],
-      transactions: payload.transactions || [],
-      employees: payload.employees || [],
-      users: payload.users || [],
-      loans: payload.loans || [],
-      auditLogs: payload.auditLogs || [],
-      rolePermissions: payload.rolePermissions || {},
-      dashboardConfig: payload.dashboardConfig || {},
-      lastUpdated: new Date().toISOString(),
-      updatedBy: payload.updatedBy || 'Sistem',
-    };
-    try {
-      await setDoc(docRef, fallbackPayload, { merge: true });
-      updateSyncState('connected', 'Tersinkronisasi Cloud');
-    } catch {
-      updateSyncState('offline', 'Mode Offline (Tersimpan Lokal)');
-    }
-    return fallbackPayload;
+    console.warn('Firestore push error:', error?.message);
+    updateSyncState('offline', 'Mode Offline (Tersimpan Lokal)');
+    return finalPayload;
   }
 }
 
+/**
+ * Backward compatibility alias for smartMergeWarehouseData
+ */
+export function smartMergeWarehouseData(
+  local: Partial<WarehouseSyncPayload>,
+  remote: Partial<WarehouseSyncPayload>
+): WarehouseSyncPayload {
+  return {
+    items: remote.items || local.items || [],
+    transactions: remote.transactions || local.transactions || [],
+    employees: remote.employees || local.employees || [],
+    users: remote.users || local.users || [],
+    loans: remote.loans || local.loans || [],
+    auditLogs: remote.auditLogs || local.auditLogs || [],
+    rolePermissions: remote.rolePermissions || local.rolePermissions || {},
+    dashboardConfig: { ...(local.dashboardConfig || {}), ...(remote.dashboardConfig || {}) },
+    lastUpdated: remote.lastUpdated || local.lastUpdated || new Date().toISOString(),
+    updatedBy: remote.updatedBy || local.updatedBy || 'Sistem',
+    lastWriterId: remote.lastWriterId || local.lastWriterId,
+  };
+}

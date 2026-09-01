@@ -303,7 +303,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
               <span>1. Asal Barang & Petugas Penerima</span>
             </h4>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
               {/* Petugas Penerima */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -315,7 +315,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
                   value={receivedByOfficer}
                   onChange={(e) => setReceivedByOfficer(e.target.value)}
                   placeholder="Nama petugas GA..."
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] font-medium"
+                  className="w-full h-10 px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] font-medium"
                 />
               </div>
 
@@ -325,11 +325,11 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
                   <MapPin className="w-3.5 h-3.5 text-[#1B5E20]" />
                   <span>Pilihan Asal Barang <span className="text-rose-500">*</span></span>
                 </label>
-                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200">
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 h-10 items-center">
                   <button
                     type="button"
                     onClick={() => setOriginType('Samarinda')}
-                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all text-center cursor-pointer ${
+                    className={`h-full px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
                       originType === 'Samarinda'
                         ? 'bg-[#1B5E20] text-white shadow-xs'
                         : 'text-slate-700 hover:bg-slate-200'
@@ -340,7 +340,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setOriginType('Kota Bangun')}
-                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all text-center cursor-pointer ${
+                    className={`h-full px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${
                       originType === 'Kota Bangun'
                         ? 'bg-[#1B5E20] text-white shadow-xs'
                         : 'text-slate-700 hover:bg-slate-200'
@@ -361,7 +361,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
                   value={documentNumber}
                   onChange={(e) => setDocumentNumber(e.target.value)}
                   placeholder="Contoh: SJ-2026-0881"
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] font-mono"
+                  className="w-full h-10 px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] font-mono"
                 />
               </div>
             </div>

@@ -304,18 +304,18 @@ export default function App() {
     };
   }, [items, transactions, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser]);
 
-  // Helper to immediately push latest state to Cloud Firestore with smart-merge safety
+  // Helper to immediately push authoritative state to Cloud Firestore
   const syncToCloud = (overrides?: Partial<WarehouseSyncPayload>) => {
     const current = latestStateRef.current;
     const payload: Partial<WarehouseSyncPayload> & { updatedBy: string } = {
-      items: overrides?.items || current.items,
-      transactions: overrides?.transactions || current.transactions,
-      employees: overrides?.employees || current.employees,
-      users: overrides?.users || current.users,
-      loans: overrides?.loans || current.loans,
-      auditLogs: overrides?.auditLogs || current.auditLogs,
-      rolePermissions: overrides?.rolePermissions || current.rolePermissions,
-      dashboardConfig: overrides?.dashboardConfig || current.dashboardConfig,
+      items: overrides?.items !== undefined ? overrides.items : current.items,
+      transactions: overrides?.transactions !== undefined ? overrides.transactions : current.transactions,
+      employees: overrides?.employees !== undefined ? overrides.employees : current.employees,
+      users: overrides?.users !== undefined ? overrides.users : current.users,
+      loans: overrides?.loans !== undefined ? overrides.loans : current.loans,
+      auditLogs: overrides?.auditLogs !== undefined ? overrides.auditLogs : current.auditLogs,
+      rolePermissions: overrides?.rolePermissions !== undefined ? overrides.rolePermissions : current.rolePermissions,
+      dashboardConfig: overrides?.dashboardConfig !== undefined ? overrides.dashboardConfig : current.dashboardConfig,
       updatedBy: current.currentUser?.fullName || 'Sistem',
     };
     pushWarehouseSync(payload).catch((err) => {
@@ -323,36 +323,23 @@ export default function App() {
     });
   };
 
-  // Manual refresh from Cloud button handler (Smart Merged - Never wipes local transactions!)
+  // Manual refresh from Cloud button handler (Direct authoritative fetch)
   const handleManualRefreshCloud = async () => {
     showToast('Menghubungkan & menyinkronkan data Cloud Firestore...', 'info');
     try {
-      const current = latestStateRef.current;
-      const localSnapshot = {
-        items: current.items,
-        transactions: current.transactions,
-        employees: current.employees,
-        users: current.users,
-        loans: current.loans,
-        auditLogs: current.auditLogs,
-        rolePermissions: current.rolePermissions,
-        dashboardConfig: current.dashboardConfig,
-        updatedBy: current.currentUser.fullName,
-      };
-      const mergedData = await fetchFreshWarehouseData(localSnapshot);
-      if (mergedData) {
-        isRemoteUpdate.current = true;
-        if (Array.isArray(mergedData.items)) setItems(mergedData.items);
-        if (Array.isArray(mergedData.transactions)) setTransactions(mergedData.transactions);
-        if (Array.isArray(mergedData.employees)) setEmployees(mergedData.employees);
-        if (Array.isArray(mergedData.users)) setUsers(sanitizeUsersList(mergedData.users));
-        if (Array.isArray(mergedData.loans)) setLoans(mergedData.loans);
-        if (Array.isArray(mergedData.auditLogs)) setAuditLogs(mergedData.auditLogs);
-        if (mergedData.rolePermissions) setRolePermissions(mergedData.rolePermissions);
-        if (mergedData.dashboardConfig) setDashboardConfig(mergedData.dashboardConfig);
+      const cloudData = await fetchFreshWarehouseData();
+      if (cloudData) {
+        if (Array.isArray(cloudData.items)) setItems(cloudData.items);
+        if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
+        if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
+        if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
+        if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
+        if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
+        if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
+        if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
         isInitialCloudLoaded.current = true;
         showToast(
-          `Sinkronisasi Cloud berhasil! ${mergedData.transactions?.length || 0} transaksi & ${mergedData.items?.length || 0} barang aman.`,
+          `Sinkronisasi Cloud berhasil! ${cloudData.transactions?.length || 0} transaksi & ${cloudData.items?.length || 0} barang tersinkronisasi.`,
           'success'
         );
       } else {
@@ -375,74 +362,31 @@ export default function App() {
   useEffect(() => {
     const unsubscribeCrossTab = subscribeToCrossTabSync((incomingData) => {
       if (incomingData) {
-        isRemoteUpdate.current = true;
-        const current = latestStateRef.current;
-        const merged = smartMergeWarehouseData(
-          {
-            items: current.items,
-            transactions: current.transactions,
-            employees: current.employees,
-            users: current.users,
-            loans: current.loans,
-            auditLogs: current.auditLogs,
-            rolePermissions: current.rolePermissions,
-            dashboardConfig: current.dashboardConfig,
-          },
-          incomingData
-        );
-
-        if (Array.isArray(merged.items)) setItems(merged.items);
-        if (Array.isArray(merged.transactions)) setTransactions(merged.transactions);
-        if (Array.isArray(merged.employees)) setEmployees(merged.employees);
-        if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
-        if (Array.isArray(merged.loans)) setLoans(merged.loans);
-        if (Array.isArray(merged.auditLogs)) setAuditLogs(merged.auditLogs);
-        if (merged.rolePermissions) setRolePermissions(merged.rolePermissions);
-        if (merged.dashboardConfig) setDashboardConfig(merged.dashboardConfig);
+        if (Array.isArray(incomingData.items)) setItems(incomingData.items);
+        if (Array.isArray(incomingData.transactions)) setTransactions(incomingData.transactions);
+        if (Array.isArray(incomingData.employees)) setEmployees(incomingData.employees);
+        if (Array.isArray(incomingData.users)) setUsers(sanitizeUsersList(incomingData.users));
+        if (Array.isArray(incomingData.loans)) setLoans(incomingData.loans);
+        if (Array.isArray(incomingData.auditLogs)) setAuditLogs(incomingData.auditLogs);
+        if (incomingData.rolePermissions) setRolePermissions(incomingData.rolePermissions);
+        if (incomingData.dashboardConfig) setDashboardConfig(incomingData.dashboardConfig);
       }
     });
-
-    // Cross-tab storage event listener
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY_TRANSACTIONS && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) {
-            const current = latestStateRef.current;
-            const merged = smartMergeWarehouseData({ transactions: current.transactions }, { transactions: parsed });
-            setTransactions(merged.transactions);
-          }
-        } catch {}
-      }
-      if (e.key === STORAGE_KEY_ITEMS && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) {
-            const current = latestStateRef.current;
-            const merged = smartMergeWarehouseData({ items: current.items }, { items: parsed });
-            setItems(merged.items);
-          }
-        } catch {}
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
 
     // Initial cloud fetch on startup to establish connection & pull latest cloud transactions
     const initStartupSync = async () => {
       try {
-        const current = latestStateRef.current;
-        await fetchFreshWarehouseData({
-          items: current.items,
-          transactions: current.transactions,
-          employees: current.employees,
-          users: current.users,
-          loans: current.loans,
-          auditLogs: current.auditLogs,
-          rolePermissions: current.rolePermissions,
-          dashboardConfig: current.dashboardConfig,
-          updatedBy: current.currentUser?.fullName || 'Sistem',
-        });
+        const cloudData = await fetchFreshWarehouseData();
+        if (cloudData) {
+          if (Array.isArray(cloudData.items)) setItems(cloudData.items);
+          if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
+          if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
+          if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
+          if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
+          if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
+          if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
+          if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
+        }
         isInitialCloudLoaded.current = true;
       } catch (e) {
         console.warn('Initial cloud sync notice:', e);
@@ -452,7 +396,6 @@ export default function App() {
 
     return () => {
       unsubscribeCrossTab();
-      window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 
@@ -460,30 +403,22 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeToWarehouseData((cloudData) => {
       if (cloudData) {
-        isRemoteUpdate.current = true;
-        const current = latestStateRef.current;
-        const merged = smartMergeWarehouseData(
-          {
-            items: current.items,
-            transactions: current.transactions,
-            employees: current.employees,
-            users: current.users,
-            loans: current.loans,
-            auditLogs: current.auditLogs,
-            rolePermissions: current.rolePermissions,
-            dashboardConfig: current.dashboardConfig,
-          },
-          cloudData
-        );
+        // Detect if there are new pending approval requests
+        const prevPending = latestStateRef.current.transactions.filter(t => t.status === 'PENDING').length;
+        const newPending = (cloudData.transactions || []).filter((t: any) => t.status === 'PENDING').length;
+        
+        if (newPending > prevPending && (latestStateRef.current.currentUser.role === 'ADMIN' || latestStateRef.current.currentUser.role === 'MASTER_ADMIN')) {
+          showToast(`🔔 Notifikasi: Ada ${newPending} transaksi permintaan barang menunggu persetujuan!`, 'info');
+        }
 
-        if (Array.isArray(merged.items)) setItems(merged.items);
-        if (Array.isArray(merged.transactions)) setTransactions(merged.transactions);
-        if (Array.isArray(merged.employees)) setEmployees(merged.employees);
-        if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
-        if (Array.isArray(merged.loans)) setLoans(merged.loans);
-        if (Array.isArray(merged.auditLogs)) setAuditLogs(merged.auditLogs);
-        if (merged.rolePermissions) setRolePermissions(merged.rolePermissions);
-        if (merged.dashboardConfig) setDashboardConfig(merged.dashboardConfig);
+        if (Array.isArray(cloudData.items)) setItems(cloudData.items);
+        if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
+        if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
+        if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
+        if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
+        if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
+        if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
+        if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
         isInitialCloudLoaded.current = true;
       }
     });
@@ -492,34 +427,6 @@ export default function App() {
       if (unsubscribe) unsubscribe();
     };
   }, []);
-
-  // Sync to Firestore when local master data updates (debounced backup)
-  useEffect(() => {
-    if (!isInitialCloudLoaded.current) return;
-    if (isRemoteUpdate.current) {
-      isRemoteUpdate.current = false;
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      const current = latestStateRef.current;
-      pushWarehouseSync({
-        items: current.items,
-        transactions: current.transactions,
-        employees: current.employees,
-        users: current.users,
-        loans: current.loans,
-        auditLogs: current.auditLogs,
-        rolePermissions: current.rolePermissions,
-        dashboardConfig: current.dashboardConfig,
-        updatedBy: current.currentUser?.fullName || 'Sistem',
-      }).catch((err) => {
-        console.warn('Silent Firestore sync error:', err?.message);
-      });
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [items, transactions, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser.fullName]);
 
   // Persist states to localStorage
   useEffect(() => {
@@ -1279,15 +1186,15 @@ export default function App() {
                 <span className="hidden xl:inline">Personil ({employees.length})</span>
               </button>
 
-              {/* Header Icon: Dashboard & Branding Settings (Master Admin Only, hidden on Mobile) */}
+              {/* Header Icon: Dashboard & Branding Settings (Master Admin Only) */}
               {currentUser.role === 'MASTER_ADMIN' && (
                 <button
                   type="button"
                   onClick={() => setIsSettingsModalOpen(true)}
                   title="Konfigurasi Dashboard, Tema & Logo (Khusus Master Admin)"
-                  className="hidden md:block p-1.5 sm:p-2 text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 shadow-sm transition-all cursor-pointer shrink-0"
+                  className="p-1.5 sm:p-2 text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 shadow-xs transition-all cursor-pointer shrink-0 flex items-center justify-center"
                 >
-                  <SlidersHorizontal className="w-4 h-4 text-blue-300" />
+                  <SlidersHorizontal className="w-4 h-4 text-sky-300" />
                 </button>
               )}
 
@@ -1300,16 +1207,6 @@ export default function App() {
               >
                 <LogOut className="w-4 h-4" />
                 <span className="hidden lg:inline">Keluar</span>
-              </button>
-
-              {/* Mobile Navigation Menu Toggle */}
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                title="Menu Navigasi Mobile"
-                className="p-1.5 sm:p-2 md:hidden text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 cursor-pointer shrink-0"
-              >
-                {mobileMenuOpen ? <X className="w-4.5 h-4.5" /> : <Menu className="w-4.5 h-4.5" />}
               </button>
             </div>
           </div>
@@ -1328,165 +1225,8 @@ export default function App() {
         onOpenEmployeeModal={() => setIsEmployeeModalOpen(true)}
         onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
         onOpenGoogleSheets={() => setIsGoogleSheetsModalOpen(true)}
+        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
       />
-
-      {/* Mobile Drawer Navigation */}
-      {mobileMenuOpen && (
-        <div className="md:hidden bg-slate-900 text-white px-4 py-3 border-b border-slate-800 space-y-1.5 animate-in slide-in-from-top-2">
-          <div className="pb-2 mb-2 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span>Menu Navigasi Modul</span>
-            <span className="text-[11px] font-mono text-blue-400">{currentUser.fullName} ({currentUser.role})</span>
-          </div>
-
-          <button
-            onClick={() => {
-              setActiveTab('dashboard');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3.5 py-2.5 text-xs font-bold rounded-xl flex items-center gap-2.5 ${
-              activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" /> Dashboard Ringkas
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('request');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3.5 py-2.5 text-xs font-bold rounded-xl flex items-center justify-between ${
-              activeTab === 'request' ? 'bg-amber-500 text-slate-950' : 'text-amber-300 hover:bg-slate-800'
-            }`}
-          >
-            <span className="flex items-center gap-2.5">
-              <ArrowUpRight className="w-4 h-4" /> Permintaan Barang
-            </span>
-            {pendingApprovalsCount > 0 && (
-              <span className="px-1.5 py-0.2 text-[10px] bg-rose-500 text-white font-bold rounded-full">
-                {pendingApprovalsCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('incoming');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3.5 py-2.5 text-xs font-bold rounded-xl flex items-center gap-2.5 ${
-              activeTab === 'incoming' ? 'bg-emerald-600 text-white' : 'text-emerald-300 hover:bg-slate-800'
-            }`}
-          >
-            <ArrowDownLeft className="w-4 h-4" /> Barang Masuk
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('stock');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3.5 py-2.5 text-xs font-bold rounded-xl flex items-center justify-between ${
-              activeTab === 'stock' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <span className="flex items-center gap-2.5">
-              <Package className="w-4 h-4" /> Stock Barang ({items.length})
-            </span>
-            {lowStockCount > 0 && (
-              <span className="px-1.5 py-0.2 text-[10px] bg-rose-500 text-white font-bold rounded-full">
-                {lowStockCount} Kritis
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('loans');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3.5 py-2.5 text-xs font-bold rounded-xl flex items-center justify-between ${
-              activeTab === 'loans' ? 'bg-purple-600 text-white' : 'text-purple-300 hover:bg-slate-800'
-            }`}
-          >
-            <span className="flex items-center gap-2.5">
-              <HandHelping className="w-4 h-4" /> Peminjaman Barang
-            </span>
-            {activeLoansCount > 0 && (
-              <span className="px-1.5 py-0.2 text-[10px] bg-purple-500 text-white font-bold rounded-full">
-                {activeLoansCount} Dipinjam
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('transactions');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3.5 py-2.5 text-xs font-bold rounded-xl flex items-center gap-2.5 ${
-              activeTab === 'transactions' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <History className="w-4 h-4" /> Riwayat Transaksi ({transactions.length})
-          </button>
-
-          <div className="pt-2 mt-2 border-t border-slate-800 space-y-1">
-            <button
-              onClick={() => {
-                setIsGoogleSheetsModalOpen(true);
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left px-3.5 py-2 text-xs font-bold rounded-xl flex items-center justify-between text-emerald-300 hover:bg-slate-800"
-            >
-              <span className="flex items-center gap-2.5">
-                <FileSpreadsheet className="w-4 h-4" /> Integrasi Google Sheets
-              </span>
-              <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-md font-mono">
-                API Live
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                setIsEmployeeModalOpen(true);
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left px-3.5 py-2 text-xs font-bold rounded-xl flex items-center justify-between text-emerald-300 hover:bg-slate-800"
-            >
-              <span className="flex items-center gap-2.5">
-                <Users className="w-4 h-4" /> Database Personil
-              </span>
-              <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-md font-mono">
-                {employees.length} Orang
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                setIsRoleSwitcherOpen(true);
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2.5 text-amber-300 hover:bg-slate-800"
-            >
-              <ShieldCheck className="w-4 h-4" /> Ganti Akun / Role
-            </button>
-            {currentUser.role === 'MASTER_ADMIN' && (
-              <button
-                onClick={() => {
-                  setIsSettingsModalOpen(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full text-left px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2.5 text-blue-300 hover:bg-slate-800"
-              >
-                <SlidersHorizontal className="w-4 h-4" /> Konfigurasi Sistem & Branding
-              </button>
-            )}
-            <button
-              onClick={() => {
-                handleLogout();
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-2.5 text-rose-300 hover:bg-rose-950/50"
-            >
-              <LogOut className="w-4 h-4" /> Keluar dari Akun (Logout)
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Floating Global Toast Notification */}
       {toastMessage && (

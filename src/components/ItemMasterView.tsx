@@ -377,15 +377,16 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
         </div>
 
         {/* Action Buttons with Compact Glossy Style */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Action Buttons Toolbar with Standardized Dimensions & Clean Soft Colors */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {canReset && onClearAllStock && (
             <button
               type="button"
               onClick={() => setIsConfirmClearStockOpen(true)}
-              className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-xl border border-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="h-9 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-xl border border-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer"
               title="Kosongkan seluruh stok fisik barang menjadi 0"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+              <RotateCcw className="w-3.5 h-3.5 text-amber-700 shrink-0" />
               <span>Reset Stok 0</span>
             </button>
           )}
@@ -394,10 +395,10 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
             <button
               type="button"
               onClick={() => setIsConfirmDeleteAllItemsOpen(true)}
-              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-xl border border-rose-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="h-9 px-3 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-xl border border-rose-300 flex items-center gap-1.5 transition-colors cursor-pointer"
               title="Hapus seluruh database master barang"
             >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-700" />
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-700 shrink-0" />
               <span>Hapus Semua</span>
             </button>
           )}
@@ -409,11 +410,11 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                   href={connectedConfig.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1 transition-all shadow-2xs"
+                  className="h-9 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1 transition-all shadow-2xs"
                   title={`Buka Google Sheet: ${connectedConfig.title}`}
                 >
                   <span>Buka Sheet</span>
-                  <ArrowUpRight className="w-3 h-3 text-emerald-600" />
+                  <ArrowUpRight className="w-3 h-3 text-emerald-600 shrink-0" />
                 </a>
               )}
 
@@ -421,13 +422,13 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                 type="button"
                 onClick={handleQuickSyncStock}
                 disabled={isSyncingStockGSheet}
-                className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl border border-emerald-500/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                className="h-9 px-3 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl border border-emerald-500/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
                 title="Sinkronkan seluruh data stok ke Google Sheets sekarang"
               >
                 {isSyncingStockGSheet ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
                 ) : (
-                  <Zap className="w-3.5 h-3.5 text-emerald-300" />
+                  <Zap className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
                 )}
                 <span>{isSyncingStockGSheet ? 'Menyinkronkan...' : 'Sinkronkan Stok'}</span>
               </button>
@@ -436,19 +437,19 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                 <button
                   type="button"
                   onClick={onOpenGoogleSheets}
-                  className="px-3 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-600/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  className="h-9 px-3 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-600/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
                   title="Buka panel Integrasi Google Sheets lengkap"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200" />
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
                   <span>Google Sheets</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => setIsImportModalOpen(true)}
-                className="px-3 py-2 bg-[#E8F5E9] hover:bg-[#A5D6A7] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                className="h-9 px-3 bg-[#E8F5E9] hover:bg-[#A5D6A7] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-[#1B5E20]" />
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#1B5E20] shrink-0" />
                 <span>Excel / CSV</span>
               </button>
             </>
@@ -458,9 +459,9 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
             <button
               type="button"
               onClick={onOpenPrintSheet}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="h-9 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Printer className="w-3.5 h-3.5 text-slate-600" />
+              <Printer className="w-3.5 h-3.5 text-slate-600 shrink-0" />
               <span>Cetak Label</span>
             </button>
           )}
@@ -469,9 +470,9 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
             <button
               type="button"
               onClick={openAddModal}
-              className="px-4 py-2 bg-[#1B5E20] hover:bg-[#66BB6A] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              className="h-9 px-4 bg-[#1B5E20] hover:bg-[#66BB6A] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <PlusCircle className="w-4 h-4 text-[#A5D6A7]" />
+              <PlusCircle className="w-4 h-4 text-[#A5D6A7] shrink-0" />
               <span>Tambah Barang Baru</span>
             </button>
           )}
@@ -1104,7 +1105,9 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                   PROPERTY OF GENERAL AFFAIRS
                 </p>
                 <h4 className="font-bold text-slate-900 text-sm max-w-xs">{itemToPrint.name}</h4>
-                <p className="text-xs text-slate-600 mt-0.5">Lokasi: {itemToPrint.rackLocation}</p>
+                <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                  Lokasi: <span className="font-bold text-slate-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">{itemToPrint.rackLocation?.trim() || 'Gudang Utama'}</span>
+                </p>
                 <div className="my-2.5 py-2 px-3 bg-white rounded-lg border border-slate-200 shadow-xs">
                   <BarcodeRenderer value={itemToPrint.code} width={1.8} height={45} fontSize={12} />
                 </div>

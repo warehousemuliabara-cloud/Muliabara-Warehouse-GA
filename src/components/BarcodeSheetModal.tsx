@@ -173,8 +173,8 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
   const selectedCount = filteredItems.filter((i) => selectedIds.includes(i.id)).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[95vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200 overflow-y-auto">
+      <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[92vh] my-auto">
         {/* Modal Header */}
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -595,6 +595,10 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
                 >
                   {filteredItems.map((item) => {
                     const isChecked = selectedIds.includes(item.id);
+                    // Strictly sync with current item master data to ensure rack location is 100% accurate
+                    const masterItem = items.find((i) => i.id === item.id || i.code === item.code) || item;
+                    const displayLocation = masterItem.rackLocation?.trim() || item.rackLocation?.trim() || 'Gudang Utama';
+
                     return (
                       <div
                         key={item.id}
@@ -626,24 +630,27 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
 
                         {/* Item Information */}
                         <p className="font-bold text-xs text-slate-900 line-clamp-1 w-full text-center">
-                          {item.name}
+                          {masterItem.name}
                         </p>
-                        <p className="text-[10px] text-slate-500 font-mono">
-                          Lokasi: <span className="font-bold text-slate-700">{item.rackLocation}</span>
+                        <p className="text-[10px] text-slate-600 font-mono mt-0.5 flex items-center justify-center gap-1">
+                          <span>Lokasi:</span>
+                          <span className="font-bold text-slate-900 bg-amber-50 text-amber-950 px-1.5 py-0.2 rounded border border-amber-200/60">
+                            {displayLocation}
+                          </span>
                         </p>
 
                         {/* Barcode Graphic */}
                         <div className="my-2 py-1 px-2 bg-slate-50 rounded-lg border border-slate-100 w-full flex justify-center shadow-inner">
-                          <BarcodeRenderer value={item.code} width={1.4} height={36} fontSize={10} />
+                          <BarcodeRenderer value={masterItem.code} width={1.4} height={36} fontSize={10} />
                         </div>
 
                         {/* Footer Info */}
                         <div className="w-full flex items-center justify-between text-[9px] text-slate-500 pt-1.5 border-t border-slate-100">
                           <span className="font-semibold text-slate-700 truncate max-w-[120px]">
-                            {item.category}
+                            {masterItem.category}
                           </span>
                           <span className="font-mono font-bold text-slate-900">
-                            Stok: {item.currentStock} {item.unit}
+                            Stok: {masterItem.currentStock} {masterItem.unit}
                           </span>
                         </div>
                       </div>
