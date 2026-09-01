@@ -9,6 +9,7 @@ import {
 import { UserAccount } from '../types';
 import { INITIAL_USERS } from '../data/initialData';
 import { CompanyLogo } from './CompanyLogo';
+import { fetchFreshWarehouseData, subscribeToWarehouseData } from '../utils/firebaseSync';
 
 interface LoginViewProps {
   users?: UserAccount[];
@@ -31,10 +32,14 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const getMergedUsers = (savedList: UserAccount[]): UserAccount[] => {
     const map = new Map<string, UserAccount>();
     INITIAL_USERS.forEach((u) => map.set(u.username.toLowerCase(), u));
-    savedList.forEach((u) => {
-      const existing = map.get(u.username.toLowerCase());
-      map.set(u.username.toLowerCase(), existing ? { ...existing, ...u } : u);
-    });
+    if (Array.isArray(savedList)) {
+      savedList.forEach((u) => {
+        if (u && u.username) {
+          const existing = map.get(u.username.toLowerCase());
+          map.set(u.username.toLowerCase(), existing ? { ...existing, ...u } : u);
+        }
+      });
+    }
     return Array.from(map.values());
   };
 
@@ -62,7 +67,24 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }
   }, [users, userAccounts]);
 
-  const accounts = localAccountsList.length > 0 ? localAccountsList : INITIAL_USERS;
+  // Real-time listener for user accounts from Firestore in LoginView
+  useEffect(() => {
+    const unsubscribe = subscribeToWarehouseData((data) => {
+      if (data && data.users && Array.isArray(data.users) && data.users.length > 0) {
+        const merged = getMergedUsers(data.users);
+        setLocalAccountsList(merged);
+        try {
+          localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -70,7 +92,41 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const findMatchingUser = (accountList: UserAccount[], inputIdent: string): UserAccount | undefined => {
+    const cleanIdent = inputIdent.trim().toLowerCase();
+
+    // 1. Exact username match (Highest Priority)
+    let matched = accountList.find((u) => u.username.toLowerCase() === cleanIdent);
+
+    // 2. Exact email match
+    if (!matched) {
+      matched = accountList.find((u) => {
+        const userEmail1 = `${u.username.toLowerCase()}@muliabara.com`;
+        const userEmail2 = `${u.username.toLowerCase()}@gmail.com`;
+        return cleanIdent === userEmail1 || cleanIdent === userEmail2;
+      });
+    }
+
+    // 3. Match full name or partial words in name (e.g. "Ida", "Rian", "Adit", "Aditya", "Natha", "Mirwan", "Ira", "Anya", "Randi")
+    if (!matched) {
+      matched = accountList.find((u) => {
+        const full = u.fullName.toLowerCase();
+        const words = full.split(/[\s,.-]+/);
+        return full === cleanIdent || words.includes(cleanIdent) || full.includes(cleanIdent) || cleanIdent.includes(u.username.toLowerCase());
+      });
+    }
+
+    // 4. Role aliases fallback for Master Admin / Admin GA / Warehouse
+    if (!matched) {
+      if (cleanIdent === 'admin' || cleanIdent === 'master' || cleanIdent.includes('warehouse') || cleanIdent.includes('muliabara') || cleanIdent === 'kbct') {
+        matched = accountList.find((u) => u.role === 'MASTER_ADMIN') || accountList[0];
+      }
+    }
+
+    return matched;
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -88,79 +144,72 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      // 1. Exact username match (Highest Priority)
-      let matchedUser = accounts.find((u) => u.username.toLowerCase() === cleanIdent);
+    let currentAccounts = localAccountsList.length > 0 ? localAccountsList : INITIAL_USERS;
+    let matchedUser = findMatchingUser(currentAccounts, cleanIdent);
 
-      // 2. Exact email match
-      if (!matchedUser) {
-        matchedUser = accounts.find((u) => {
-          const userEmail1 = `${u.username.toLowerCase()}@muliabara.com`;
-          const userEmail2 = `${u.username.toLowerCase()}@gmail.com`;
-          return cleanIdent === userEmail1 || cleanIdent === userEmail2;
-        });
-      }
-
-      // 3. Match full name or partial name (e.g. "Ida", "Rian", "Adit", "Aditya", "Natha", "Mirwan", "Ira", "Anya", "Randi")
-      if (!matchedUser) {
-        matchedUser = accounts.find((u) => {
-          const full = u.fullName.toLowerCase();
-          const words = full.split(/[\s,.-]+/);
-          return full === cleanIdent || words.includes(cleanIdent) || full.includes(cleanIdent) || cleanIdent.includes(u.username.toLowerCase());
-        });
-      }
-
-      // 4. Role aliases fallback for Master Admin / Admin GA / Warehouse
-      if (!matchedUser) {
-        if (cleanIdent === 'admin' || cleanIdent === 'master' || cleanIdent.includes('warehouse') || cleanIdent.includes('muliabara') || cleanIdent === 'kbct') {
-          matchedUser = accounts.find((u) => u.role === 'MASTER_ADMIN') || accounts[0];
+    // If not found in current local list, perform direct fresh pull from Firestore server!
+    if (!matchedUser) {
+      try {
+        const cloudData = await fetchFreshWarehouseData();
+        if (cloudData && cloudData.users && Array.isArray(cloudData.users) && cloudData.users.length > 0) {
+          const freshMerged = getMergedUsers(cloudData.users);
+          setLocalAccountsList(freshMerged);
+          currentAccounts = freshMerged;
+          matchedUser = findMatchingUser(currentAccounts, cleanIdent);
+          try {
+            localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(freshMerged));
+          } catch {
+            // ignore
+          }
         }
+      } catch (fetchErr) {
+        console.warn('Cloud user fetch error:', fetchErr);
       }
+    }
 
-      // 5. If user is still not found, return explicit friendly error
-      if (!matchedUser) {
-        setErrorMsg(`Username atau nama "${identifier}" belum terdaftar. Pastikan Anda memasukkan username akun yang benar.`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      // 6. Check password against user's specific password + common team PINs
-      const expectedPassword = (matchedUser.password || '').trim();
-      const allowedUniversalPasswords = [
-        expectedPassword,
-        '1234',
-        '1222',
-        '1333',
-        '1444',
-        '1555',
-        '1666',
-        '1777',
-        'MasterAdminSecret2026!',
-        'AdminGa2026Pass#',
-        'OpsGudangPass123',
-        'admin123',
-        'admin',
-        '123456',
-        'muliabara',
-        'warehouse',
-        'gudang',
-        'password',
-      ];
-
-      const isPasswordValid =
-        cleanPass === expectedPassword ||
-        cleanPass.toLowerCase() === expectedPassword.toLowerCase() ||
-        allowedUniversalPasswords.some((p) => p.toLowerCase() === cleanPass.toLowerCase());
-
-      if (!isPasswordValid) {
-        setErrorMsg(`Password untuk akun "${matchedUser.fullName}" (@${matchedUser.username}) tidak sesuai. Silakan periksa kembali password Anda.`);
-        setIsSubmitting(false);
-        return;
-      }
-
+    // If user is still not found, return explicit friendly error
+    if (!matchedUser) {
+      setErrorMsg(`Username atau nama "${identifier}" belum terdaftar. Pastikan akun sudah dibuat pada menu Manajemen Akun di perangkat utama atau periksa ejaan username.`);
       setIsSubmitting(false);
-      onLoginSuccess(matchedUser);
-    }, 180);
+      return;
+    }
+
+    // Check password against user's specific password + common team PINs
+    const expectedPassword = (matchedUser.password || '').trim();
+    const allowedUniversalPasswords = [
+      expectedPassword,
+      '1234',
+      '1222',
+      '1333',
+      '1444',
+      '1555',
+      '1666',
+      '1777',
+      'MasterAdminSecret2026!',
+      'AdminGa2026Pass#',
+      'OpsGudangPass123',
+      'admin123',
+      'admin',
+      '123456',
+      'muliabara',
+      'warehouse',
+      'gudang',
+      'password',
+    ];
+
+    const isPasswordValid =
+      cleanPass === expectedPassword ||
+      cleanPass.toLowerCase() === expectedPassword.toLowerCase() ||
+      allowedUniversalPasswords.some((p) => p && p.toLowerCase() === cleanPass.toLowerCase());
+
+    if (!isPasswordValid) {
+      setErrorMsg(`Password untuk akun "${matchedUser.fullName}" (@${matchedUser.username}) tidak sesuai. Silakan periksa kembali password Anda.`);
+      setIsSubmitting(false);
+      return;
+    }
+
+    setIsSubmitting(false);
+    onLoginSuccess(matchedUser);
   };
 
   return (
@@ -174,8 +223,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
         
         {/* Brand Header */}
         <div className="flex flex-col items-center justify-center mb-6">
-          <div className="relative p-2 rounded-2xl bg-gradient-to-b from-white/20 via-white/10 to-transparent shadow-md shadow-black/20 ring-1 ring-white/20 mb-3 shrink-0">
-            <CompanyLogo logoUrl={logoUrl} size="lg" companyName={appName} />
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/25 ring-1 ring-white/20 mb-3 shrink-0">
+            <Lock className="w-6 h-6 text-white" />
           </div>
           
           <div className="flex items-center justify-center gap-2">

@@ -3,6 +3,7 @@ import {
   getFirestore, 
   doc, 
   setDoc, 
+  getDoc,
   onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -54,6 +55,24 @@ function updateSyncState(state: SyncState, message?: string) {
 }
 
 /**
+ * Direct fetch from Firestore server to get fresh data immediately
+ */
+export async function fetchFreshWarehouseData(): Promise<WarehouseSyncPayload | null> {
+  try {
+    const docRef = doc(db, WAREHOUSE_COLLECTION, WAREHOUSE_DOC_ID);
+    const snapshot = await getDoc(docRef);
+    if (snapshot.exists()) {
+      updateSyncState('connected', 'Tersinkronisasi Cloud');
+      return snapshot.data() as WarehouseSyncPayload;
+    }
+    return null;
+  } catch (err: any) {
+    console.warn('Direct fetch from Firestore failed:', err?.message);
+    return null;
+  }
+}
+
+/**
  * Subscribe to real-time warehouse data changes from Firestore
  */
 export function subscribeToWarehouseData(
@@ -94,7 +113,7 @@ export function subscribeToWarehouseData(
  */
 export async function pushWarehouseSync(
   payload: Partial<WarehouseSyncPayload> & { updatedBy: string }
-): Promise<void> {
+): Promise<boolean> {
   try {
     updateSyncState('syncing', 'Menyimpan ke Cloud...');
     const docRef = doc(db, WAREHOUSE_COLLECTION, WAREHOUSE_DOC_ID);
@@ -104,13 +123,15 @@ export async function pushWarehouseSync(
     };
     await setDoc(docRef, dataToSave, { merge: true });
     updateSyncState('connected', 'Tersinkronisasi Cloud');
+    return true;
   } catch (error: any) {
+    console.warn('pushWarehouseSync error:', error);
     const isOffline = error?.code === 'unavailable' || error?.message?.includes('offline');
     if (isOffline) {
       updateSyncState('offline', 'Mode Offline (Tersimpan Lokal)');
     } else {
       updateSyncState('error', error?.message || 'Gagal sinkron ke Cloud');
     }
-    // Do not throw to avoid crashing callers; local storage already holds latest state
+    return false;
   }
 }

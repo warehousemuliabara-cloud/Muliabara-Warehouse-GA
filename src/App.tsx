@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Package, 
   ArrowUpRight, 
@@ -26,7 +26,9 @@ import {
   Layers,
   Search,
   LogOut,
-  HandHelping
+  HandHelping,
+  RefreshCw,
+  Cloud
 } from 'lucide-react';
 import { 
   Item, 
@@ -70,7 +72,14 @@ import { RoleSwitcherModal } from './components/RoleSwitcherModal';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { NotificationApprovalModal } from './components/NotificationApprovalModal';
 import { ProfessionalStatsReportModal } from './components/ProfessionalStatsReportModal';
-import { subscribeToWarehouseData, pushWarehouseSync, onSyncStatusChange, SyncState } from './utils/firebaseSync';
+import { 
+  subscribeToWarehouseData, 
+  pushWarehouseSync, 
+  fetchFreshWarehouseData,
+  onSyncStatusChange, 
+  SyncState,
+  WarehouseSyncPayload 
+} from './utils/firebaseSync';
 
 const STORAGE_KEY_ITEMS = 'ga_warehouse_items_v8';
 const STORAGE_KEY_TRANSACTIONS = 'ga_warehouse_transactions_v8';
@@ -86,10 +95,14 @@ export default function App() {
   const getMergedUsers = (savedList: UserAccount[]): UserAccount[] => {
     const map = new Map<string, UserAccount>();
     INITIAL_USERS.forEach((u) => map.set(u.username.toLowerCase(), u));
-    savedList.forEach((u) => {
-      const existing = map.get(u.username.toLowerCase());
-      map.set(u.username.toLowerCase(), existing ? { ...existing, ...u } : u);
-    });
+    if (Array.isArray(savedList)) {
+      savedList.forEach((u) => {
+        if (u && u.username) {
+          const existing = map.get(u.username.toLowerCase());
+          map.set(u.username.toLowerCase(), existing ? { ...existing, ...u } : u);
+        }
+      });
+    }
     return Array.from(map.values());
   };
 
@@ -235,6 +248,53 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'warning' } | null>(null);
   const [syncState, setSyncState] = useState<SyncState>('connected');
 
+  // Multi-Device Cloud Synchronization Engine references
+  const isInitialCloudLoaded = useRef<boolean>(false);
+  const isRemoteUpdate = useRef<boolean>(false);
+
+  // Helper to immediately push latest state to Cloud Firestore
+  const syncToCloud = (overrides?: Partial<WarehouseSyncPayload>) => {
+    const payload: Partial<WarehouseSyncPayload> & { updatedBy: string } = {
+      items: overrides?.items || items,
+      transactions: overrides?.transactions || transactions,
+      employees: overrides?.employees || employees,
+      users: overrides?.users || users,
+      loans: overrides?.loans || loans,
+      auditLogs: overrides?.auditLogs || auditLogs,
+      rolePermissions: overrides?.rolePermissions || rolePermissions,
+      dashboardConfig: overrides?.dashboardConfig || dashboardConfig,
+      updatedBy: currentUser?.fullName || 'Sistem',
+    };
+    pushWarehouseSync(payload).catch((err) => {
+      console.warn('Immediate Firestore sync error:', err?.message);
+    });
+  };
+
+  // Manual refresh from Cloud button handler
+  const handleManualRefreshCloud = async () => {
+    showToast('Menghubungkan & menyinkronkan data Cloud Firestore...', 'info');
+    try {
+      const cloudData = await fetchFreshWarehouseData();
+      if (cloudData) {
+        isRemoteUpdate.current = true;
+        if (cloudData.items && Array.isArray(cloudData.items)) setItems(cloudData.items);
+        if (cloudData.transactions && Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
+        if (cloudData.employees && Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
+        if (cloudData.users && Array.isArray(cloudData.users)) setUsers(getMergedUsers(cloudData.users));
+        if (cloudData.loans && Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
+        if (cloudData.auditLogs && Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
+        if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
+        if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
+        isInitialCloudLoaded.current = true;
+        showToast('Data Cloud berhasil disinkronkan & diperbarui!', 'success');
+      } else {
+        showToast('Tidak ada data baru di Cloud, data lokal sudah mutakhir.', 'info');
+      }
+    } catch (err: any) {
+      showToast('Gagal memuat dari Cloud: ' + (err?.message || 'Koneksi offline'), 'warning');
+    }
+  };
+
   // Track Firestore connection and real-time synchronization state
   useEffect(() => {
     const unsubscribeSync = onSyncStatusChange((state) => {
@@ -247,14 +307,16 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeToWarehouseData((data) => {
       if (data) {
+        isRemoteUpdate.current = true;
         if (data.items && Array.isArray(data.items)) setItems(data.items);
         if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
         if (data.employees && Array.isArray(data.employees)) setEmployees(data.employees);
-        if (data.users && Array.isArray(data.users)) setUsers(data.users);
+        if (data.users && Array.isArray(data.users)) setUsers(getMergedUsers(data.users));
         if (data.loans && Array.isArray(data.loans)) setLoans(data.loans);
         if (data.auditLogs && Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
         if (data.rolePermissions) setRolePermissions(data.rolePermissions);
         if (data.dashboardConfig) setDashboardConfig(data.dashboardConfig);
+        isInitialCloudLoaded.current = true;
       }
     });
 
@@ -263,8 +325,14 @@ export default function App() {
     };
   }, []);
 
-  // Sync to Firestore when local master data updates (debounced)
+  // Sync to Firestore when local master data updates (debounced backup)
   useEffect(() => {
+    if (!isInitialCloudLoaded.current) return;
+    if (isRemoteUpdate.current) {
+      isRemoteUpdate.current = false;
+      return;
+    }
+
     const timer = setTimeout(() => {
       pushWarehouseSync({
         items,
@@ -279,7 +347,7 @@ export default function App() {
       }).catch((err) => {
         console.warn('Silent Firestore sync error:', err?.message);
       });
-    }, 1500);
+    }, 1000);
 
     return () => clearTimeout(timer);
   }, [items, transactions, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser.fullName]);
@@ -384,29 +452,26 @@ export default function App() {
   };
 
   const handleAddUser = (newUser: UserAccount) => {
-    setUsers((prev) => {
-      const nextUsers = [newUser, ...prev];
-      try {
-        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
-      } catch (e) {
-        console.error('Save users error', e);
-      }
-      return nextUsers;
-    });
+    const nextUsers = [newUser, ...users.filter(u => u.id !== newUser.id)];
+    setUsers(nextUsers);
+    try {
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
+    } catch (e) {
+      console.error('Save users error', e);
+    }
+    syncToCloud({ users: nextUsers });
     logAudit('Tambah Akun Pengguna', 'USERS', `Membuat akun ${newUser.fullName} (${newUser.role})`);
-    showToast(`Pengguna baru "${newUser.fullName}" berhasil didaftarkan!`, 'success');
+    showToast(`Pengguna baru "${newUser.fullName}" berhasil didaftarkan & disinkronkan ke Cloud!`, 'success');
   };
 
   const handleUpdateUser = (updatedUser: UserAccount) => {
-    setUsers((prev) => {
-      const nextUsers = prev.map((u) => (u.id === updatedUser.id ? updatedUser : u));
-      try {
-        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
-      } catch (e) {
-        console.error('Save users error', e);
-      }
-      return nextUsers;
-    });
+    const nextUsers = users.map((u) => (u.id === updatedUser.id ? updatedUser : u));
+    setUsers(nextUsers);
+    try {
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
+    } catch (e) {
+      console.error('Save users error', e);
+    }
     if (currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
       try {
@@ -415,21 +480,21 @@ export default function App() {
         console.error('Save current user error', e);
       }
     }
+    syncToCloud({ users: nextUsers });
     logAudit('Update Akun Pengguna', 'USERS', `Memperbarui profil ${updatedUser.fullName}`);
-    showToast(`Data akun "${updatedUser.fullName}" berhasil diperbarui.`, 'info');
+    showToast(`Data akun "${updatedUser.fullName}" berhasil diperbarui & disinkronkan!`, 'info');
   };
 
   const handleDeleteUser = (userId: string) => {
     const userToDel = users.find((u) => u.id === userId);
-    setUsers((prev) => {
-      const nextUsers = prev.filter((u) => u.id !== userId);
-      try {
-        localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
-      } catch (e) {
-        console.error('Save users error', e);
-      }
-      return nextUsers;
-    });
+    const nextUsers = users.filter((u) => u.id !== userId);
+    setUsers(nextUsers);
+    try {
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
+    } catch (e) {
+      console.error('Save users error', e);
+    }
+    syncToCloud({ users: nextUsers });
     logAudit('Hapus Akun Pengguna', 'USERS', `Menghapus akun ${userToDel?.fullName || userId}`);
     showToast(`Akun "${userToDel?.fullName || userId}" telah dihapus.`, 'warning');
   };
@@ -437,47 +502,58 @@ export default function App() {
   // Dashboard Settings operations
   const handleSaveConfig = (newConfig: DashboardConfig) => {
     setDashboardConfig(newConfig);
+    syncToCloud({ dashboardConfig: newConfig });
     logAudit('Update Konfigurasi Dashboard', 'SETTINGS', `Memperbarui setelan gudang & branding`);
-    showToast('Konfigurasi dashboard & sistem berhasil disimpan!', 'success');
+    showToast('Konfigurasi dashboard & sistem berhasil disimpan ke Cloud!', 'success');
   };
 
   const handleResetConfig = () => {
     setDashboardConfig(DEFAULT_DASHBOARD_CONFIG);
+    syncToCloud({ dashboardConfig: DEFAULT_DASHBOARD_CONFIG });
     logAudit('Reset Konfigurasi Dashboard', 'SETTINGS', 'Mengembalikan setelan dashboard ke default');
     showToast('Setelan dashboard dikembalikan ke default.', 'info');
   };
 
   const handleSaveLogo = (newLogoUrl: string | null) => {
-    setDashboardConfig((prev) => ({
-      ...prev,
+    const nextConfig = {
+      ...dashboardConfig,
       logoUrl: newLogoUrl,
-    }));
+    };
+    setDashboardConfig(nextConfig);
+    syncToCloud({ dashboardConfig: nextConfig });
     logAudit('Ganti Logo Perusahaan', 'SETTINGS', newLogoUrl ? 'Mengupload logo baru' : 'Mereset logo ke default');
     showToast(newLogoUrl ? 'Logo perusahaan berhasil diperbarui!' : 'Logo telah dikembalikan ke default.', 'success');
   };
 
   // Employee operations
   const handleAddEmployee = (newEmp: Employee) => {
-    setEmployees((prev) => [newEmp, ...prev]);
+    const nextEmployees = [newEmp, ...employees.filter(e => e.id !== newEmp.id)];
+    setEmployees(nextEmployees);
+    syncToCloud({ employees: nextEmployees });
     logAudit('Tambah Data Personil', 'EMPLOYEES', `Menambahkan ${newEmp.name} (${newEmp.position} - ${newEmp.department})`);
-    showToast(`Data personil "${newEmp.name}" berhasil ditambahkan!`, 'success');
+    showToast(`Data personil "${newEmp.name}" berhasil ditambahkan & disinkronkan!`, 'success');
   };
 
   const handleUpdateEmployee = (updatedEmp: Employee) => {
-    setEmployees((prev) => prev.map((e) => (e.id === updatedEmp.id ? updatedEmp : e)));
+    const nextEmployees = employees.map((e) => (e.id === updatedEmp.id ? updatedEmp : e));
+    setEmployees(nextEmployees);
+    syncToCloud({ employees: nextEmployees });
     logAudit('Update Data Personil', 'EMPLOYEES', `Memperbarui data ${updatedEmp.name}`);
     showToast(`Data personil "${updatedEmp.name}" berhasil diperbarui.`, 'info');
   };
 
   const handleDeleteEmployee = (empId: string) => {
     const deleted = employees.find((e) => e.id === empId);
-    setEmployees((prev) => prev.filter((e) => e.id !== empId));
+    const nextEmployees = employees.filter((e) => e.id !== empId);
+    setEmployees(nextEmployees);
+    syncToCloud({ employees: nextEmployees });
     logAudit('Hapus Data Personil', 'EMPLOYEES', `Menghapus ${deleted?.name || empId}`);
     showToast(`Personil "${deleted?.name || empId}" telah dihapus dari database.`, 'warning');
   };
 
   const handleResetEmployees = () => {
     setEmployees(INITIAL_EMPLOYEES);
+    syncToCloud({ employees: INITIAL_EMPLOYEES });
     logAudit('Reset Database Personil', 'EMPLOYEES', 'Memulihkan data 114 karyawan awal');
     showToast('Database personil telah di-reset ke data master awal (114 nama).', 'info');
   };
@@ -498,82 +574,94 @@ export default function App() {
 
   // Stock operations
   const handleAddItem = (newItem: Item) => {
-    setItems((prev) => [newItem, ...prev]);
+    const nextItems = [newItem, ...items.filter(i => i.id !== newItem.id)];
+    setItems(nextItems);
+    syncToCloud({ items: nextItems });
     logAudit('Tambah Master Barang', 'STOCK', `Menambahkan barang "${newItem.name}" (${newItem.code}) stok awal: ${newItem.currentStock} ${newItem.unit}`);
-    showToast(`Barang baru "${newItem.name}" (${newItem.code}) berhasil ditambahkan!`, 'success');
+    showToast(`Barang baru "${newItem.name}" (${newItem.code}) berhasil ditambahkan & disinkronkan!`, 'success');
   };
 
   const handleBulkAddItems = (newItems: Item[], mode: 'append' | 'replace' = 'append') => {
+    let nextItems: Item[];
     if (mode === 'replace') {
-      setItems(newItems);
+      nextItems = newItems;
+      setItems(nextItems);
+      syncToCloud({ items: nextItems });
       logAudit('Import Excel (Replace)', 'STOCK', `Mengganti seluruh katalog dengan ${newItems.length} barang baru`);
       showToast(`Berhasil mengimpor ${newItems.length} data barang (semua diganti)!`, 'success');
     } else {
-      setItems((prev) => {
-        const existingCodes = new Set(prev.map(p => p.code.toLowerCase()));
-        const uniqueNew = newItems.filter(item => !existingCodes.has(item.code.toLowerCase()));
-        return [...newItems, ...prev.filter(p => !newItems.some(n => n.id === p.id || n.code.toLowerCase() === p.code.toLowerCase()))];
-      });
+      const existingCodes = new Set(items.map(p => p.code.toLowerCase()));
+      nextItems = [...newItems, ...items.filter(p => !newItems.some(n => n.id === p.id || n.code.toLowerCase() === p.code.toLowerCase()))];
+      setItems(nextItems);
+      syncToCloud({ items: nextItems });
       logAudit('Import Excel (Append)', 'STOCK', `Menambahkan ${newItems.length} data barang dari Excel/CSV`);
       showToast(`Berhasil mengimpor ${newItems.length} data barang baru!`, 'success');
     }
   };
 
   const handleUpdateItem = (updated: Item) => {
-    setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    const nextItems = items.map((item) => (item.id === updated.id ? updated : item));
+    setItems(nextItems);
+    syncToCloud({ items: nextItems });
     logAudit('Update Master Barang', 'STOCK', `Memperbarui item ${updated.name} (${updated.code})`);
     showToast(`Data barang "${updated.name}" berhasil diperbarui.`, 'info');
   };
 
   const handleDeleteItem = (itemId: string) => {
     const deleted = items.find((i) => i.id === itemId);
-    setItems((prev) => prev.filter((item) => item.id !== itemId));
+    const nextItems = items.filter((item) => item.id !== itemId);
+    setItems(nextItems);
+    syncToCloud({ items: nextItems });
     logAudit('Hapus Master Barang', 'STOCK', `Menghapus item ${deleted?.name || itemId} (${deleted?.code})`);
     showToast(`Barang "${deleted?.name || itemId}" telah dihapus.`, 'warning');
   };
 
   const handleClearAllStock = () => {
-    setItems((prev) =>
-      prev.map((item) => ({
-        ...item,
-        currentStock: 0,
-        updatedAt: new Date().toISOString(),
-      }))
-    );
+    const nextItems = items.map((item) => ({
+      ...item,
+      currentStock: 0,
+      updatedAt: new Date().toISOString(),
+    }));
+    setItems(nextItems);
+    syncToCloud({ items: nextItems });
     logAudit('Kosongkan Stok (0)', 'STOCK', 'Master Admin mereset seluruh kuantitas stok fisik menjadi 0');
     showToast('Seluruh jumlah stok barang telah dikosongkan (0).', 'info');
   };
 
   const handleDeleteAllStockItems = () => {
     setItems([]);
+    syncToCloud({ items: [] });
     logAudit('Hapus Semua Data Barang', 'STOCK', 'Master Admin menghapus bersih seluruh katalog master barang');
     showToast('Seluruh data master barang telah dihapus bersih dari database.', 'warning');
   };
 
-  // Transaction submission (IN & OUT)
+  // Transaction submission (IN & OUT) with instant Cloud broadcast
   const handleSubmitTransaction = (newTrx: Transaction) => {
-    // If request requires approval and is PENDING, do not subtract physical stock yet until approved & dispatched
     const isPendingApproval = newTrx.type === 'OUT' && newTrx.status === 'PENDING';
+    let nextItems = items;
 
     if (!isPendingApproval) {
-      setItems((prevItems) => {
-        return prevItems.map((item) => {
-          const trxItem = newTrx.items.find((i) => i.itemId === item.id);
-          if (trxItem) {
-            if (newTrx.type === 'OUT') {
-              const newStock = Math.max(0, item.currentStock - trxItem.quantity);
-              return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
-            } else {
-              const newStock = item.currentStock + trxItem.quantity;
-              return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
-            }
+      nextItems = items.map((item) => {
+        const trxItem = newTrx.items.find((i) => i.itemId === item.id);
+        if (trxItem) {
+          if (newTrx.type === 'OUT') {
+            const newStock = Math.max(0, item.currentStock - trxItem.quantity);
+            return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
+          } else {
+            const newStock = item.currentStock + trxItem.quantity;
+            return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
           }
-          return item;
-        });
+        }
+        return item;
       });
+      setItems(nextItems);
     }
 
-    setTransactions((prev) => [newTrx, ...prev]);
+    const nextTrx = [newTrx, ...transactions];
+    setTransactions(nextTrx);
+
+    // Broadcast immediately to Firestore so other phones/devices see it instantly!
+    syncToCloud({ items: nextItems, transactions: nextTrx });
 
     if (newTrx.type === 'OUT') {
       logAudit(
@@ -593,12 +681,12 @@ export default function App() {
     }
   };
 
-  // Approval Handlers
+  // Approval Handlers with immediate Cloud sync
   const handleApproveRequest = (trxId: string, notes?: string) => {
     const trx = transactions.find(t => t.id === trxId);
     if (!trx) return;
 
-    setTransactions(prev => prev.map(t => {
+    const nextTrx = transactions.map(t => {
       if (t.id === trxId) {
         return {
           ...t,
@@ -613,7 +701,10 @@ export default function App() {
         };
       }
       return t;
-    }));
+    });
+
+    setTransactions(nextTrx);
+    syncToCloud({ transactions: nextTrx });
 
     logAudit('Approval Permintaan', 'TRANSACTIONS', `Admin menyetujui permintaan [${trx.transactionNumber}] (${trx.requesterName})`);
     showToast(`Permintaan [${trx.transactionNumber}] telah disetujui. Siap diserah-terimakan.`, 'success');
@@ -623,7 +714,7 @@ export default function App() {
     const trx = transactions.find(t => t.id === trxId);
     if (!trx) return;
 
-    setTransactions(prev => prev.map(t => {
+    const nextTrx = transactions.map(t => {
       if (t.id === trxId) {
         return {
           ...t,
@@ -638,7 +729,10 @@ export default function App() {
         };
       }
       return t;
-    }));
+    });
+
+    setTransactions(nextTrx);
+    syncToCloud({ transactions: nextTrx });
 
     logAudit('Penolakan Permintaan', 'TRANSACTIONS', `Admin menolak permintaan [${trx.transactionNumber}]: ${notes || '-'}`);
     showToast(`Permintaan [${trx.transactionNumber}] ditolak.`, 'warning');
@@ -649,18 +743,17 @@ export default function App() {
     if (!trx) return;
 
     // Deduct stock upon actual dispatch
-    setItems((prevItems) => {
-      return prevItems.map((item) => {
-        const trxItem = trx.items.find((i) => i.itemId === item.id);
-        if (trxItem) {
-          const newStock = Math.max(0, item.currentStock - trxItem.quantity);
-          return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
-        }
-        return item;
-      });
+    const nextItems = items.map((item) => {
+      const trxItem = trx.items.find((i) => i.itemId === item.id);
+      if (trxItem) {
+        const newStock = Math.max(0, item.currentStock - trxItem.quantity);
+        return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
+      }
+      return item;
     });
+    setItems(nextItems);
 
-    setTransactions(prev => prev.map(t => {
+    const nextTrx = transactions.map(t => {
       if (t.id === trxId) {
         return {
           ...t,
@@ -670,7 +763,10 @@ export default function App() {
         };
       }
       return t;
-    }));
+    });
+    setTransactions(nextTrx);
+
+    syncToCloud({ items: nextItems, transactions: nextTrx });
 
     logAudit('Serah Terima Barang', 'TRANSACTIONS', `Barang [${trx.transactionNumber}] telah diserahkan ke ${trx.requesterName}`);
     showToast(`Serah terima barang [${trx.transactionNumber}] selesai! Stok terpotong.`, 'success');
@@ -680,31 +776,34 @@ export default function App() {
     const trxToDelete = transactions.find((t) => t.id === transactionId);
     if (!trxToDelete) return;
 
+    let nextItems = items;
     if (revertStock && trxToDelete.status !== 'REJECTED' && trxToDelete.status !== 'PENDING') {
-      setItems((prevItems) => {
-        return prevItems.map((item) => {
-          const trxItem = trxToDelete.items.find((i) => i.itemId === item.id);
-          if (trxItem) {
-            if (trxToDelete.type === 'OUT') {
-              return {
-                ...item,
-                currentStock: item.currentStock + trxItem.quantity,
-                updatedAt: new Date().toISOString(),
-              };
-            } else {
-              return {
-                ...item,
-                currentStock: Math.max(0, item.currentStock - trxItem.quantity),
-                updatedAt: new Date().toISOString(),
-              };
-            }
+      nextItems = items.map((item) => {
+        const trxItem = trxToDelete.items.find((i) => i.itemId === item.id);
+        if (trxItem) {
+          if (trxToDelete.type === 'OUT') {
+            return {
+              ...item,
+              currentStock: item.currentStock + trxItem.quantity,
+              updatedAt: new Date().toISOString(),
+            };
+          } else {
+            return {
+              ...item,
+              currentStock: Math.max(0, item.currentStock - trxItem.quantity),
+              updatedAt: new Date().toISOString(),
+            };
           }
-          return item;
-        });
+        }
+        return item;
       });
+      setItems(nextItems);
     }
 
-    setTransactions((prev) => prev.filter((t) => t.id !== transactionId));
+    const nextTrx = transactions.filter((t) => t.id !== transactionId);
+    setTransactions(nextTrx);
+    syncToCloud({ items: nextItems, transactions: nextTrx });
+
     logAudit('Hapus Transaksi', 'TRANSACTIONS', `Menghapus log transaksi ${trxToDelete.transactionNumber}${revertStock ? ' dengan rollback stok' : ''}`);
     showToast(
       `Transaksi [${trxToDelete.transactionNumber}] berhasil dihapus${revertStock ? ' dan stok dipulihkan' : ''}.`,
@@ -713,28 +812,36 @@ export default function App() {
   };
 
   const handleClearTransactions = (type: 'ALL' | 'IN' | 'OUT' = 'ALL') => {
+    let nextTrx: Transaction[];
     if (type === 'ALL') {
+      nextTrx = [];
       setTransactions([]);
+      syncToCloud({ transactions: [] });
       logAudit('Hapus Semua Riwayat', 'TRANSACTIONS', 'Membersihkan seluruh log riwayat keluar & masuk');
       showToast('Seluruh riwayat transaksi log telah dikosongkan.', 'warning');
     } else {
-      setTransactions((prev) => prev.filter((t) => t.type !== type));
+      nextTrx = transactions.filter((t) => t.type !== type);
+      setTransactions(nextTrx);
+      syncToCloud({ transactions: nextTrx });
       logAudit('Hapus Riwayat Transaksi', 'TRANSACTIONS', `Membersihkan log riwayat tipe ${type}`);
       showToast(`Riwayat transaksi barang ${type === 'OUT' ? 'KELUAR' : 'MASUK'} telah dibersihkan.`, 'warning');
     }
   };
 
-  // Item Loans operations
+  // Item Loans operations with immediate Cloud sync
   const handleAddLoan = (newLoan: ItemLoan) => {
-    setLoans((prev) => [newLoan, ...prev]);
+    const nextLoans = [newLoan, ...loans];
+    setLoans(nextLoans);
+    
     // Deduct stock if active
-    setItems((prev) =>
-      prev.map((it) =>
-        it.id === newLoan.itemId
-          ? { ...it, currentStock: Math.max(0, it.currentStock - newLoan.quantity) }
-          : it
-      )
+    const nextItems = items.map((it) =>
+      it.id === newLoan.itemId
+        ? { ...it, currentStock: Math.max(0, it.currentStock - newLoan.quantity) }
+        : it
     );
+    setItems(nextItems);
+
+    syncToCloud({ loans: nextLoans, items: nextItems });
     logAudit('Pinjam Barang', 'LOANS', `Peminjaman "${newLoan.itemName}" (${newLoan.quantity} ${newLoan.unit}) oleh ${newLoan.borrowerName}`);
     showToast(`Peminjaman barang [${newLoan.loanNumber}] berhasil dicatat!`, 'success');
   };
@@ -749,39 +856,41 @@ export default function App() {
 
     const returnDateStr = new Date().toISOString().substring(0, 10);
 
-    setLoans((prev) =>
-      prev.map((l) =>
-        l.id === loanId
-          ? {
-              ...l,
-              status: 'RETURNED',
-              actualReturnDate: returnDateStr,
-              receivedReturnBy: currentUser.fullName,
-              returnCondition: condition,
-              returnNotes: notes,
-            }
-          : l
-      )
+    const nextLoans = loans.map((l) =>
+      l.id === loanId
+        ? {
+            ...l,
+            status: 'RETURNED' as const,
+            actualReturnDate: returnDateStr,
+            receivedReturnBy: currentUser.fullName,
+            returnCondition: condition,
+            returnNotes: notes,
+          }
+        : l
     );
+    setLoans(nextLoans);
 
     // Restore stock if not lost
+    let nextItems = items;
     if (condition !== 'HILANG') {
-      setItems((prev) =>
-        prev.map((it) =>
-          it.id === loan.itemId
-            ? { ...it, currentStock: it.currentStock + loan.quantity }
-            : it
-        )
+      nextItems = items.map((it) =>
+        it.id === loan.itemId
+          ? { ...it, currentStock: it.currentStock + loan.quantity }
+          : it
       );
+      setItems(nextItems);
     }
 
+    syncToCloud({ loans: nextLoans, items: nextItems });
     logAudit('Pengembalian Pinjaman', 'LOANS', `Pengembalian barang [${loan.loanNumber}] (${loan.itemName}) kondisi: ${condition}`);
     showToast(`Pengembalian barang [${loan.loanNumber}] berhasil dicatat. Stok barang dipulihkan.`, 'success');
   };
 
   const handleDeleteLoan = (loanId: string) => {
     const loan = loans.find((l) => l.id === loanId);
-    setLoans((prev) => prev.filter((l) => l.id !== loanId));
+    const nextLoans = loans.filter((l) => l.id !== loanId);
+    setLoans(nextLoans);
+    syncToCloud({ loans: nextLoans });
     logAudit('Hapus Data Pinjaman', 'LOANS', `Menghapus arsip pinjaman ${loan?.loanNumber || loanId}`);
     showToast(`Data pinjaman [${loan?.loanNumber || loanId}] telah dihapus.`, 'warning');
   };
@@ -803,6 +912,15 @@ export default function App() {
     localStorage.removeItem(STORAGE_KEY_CURRENT_USER);
     localStorage.removeItem(STORAGE_KEY_LOANS);
     localStorage.removeItem(STORAGE_KEY_CONFIG);
+
+    syncToCloud({
+      items: INITIAL_ITEMS,
+      transactions: INITIAL_TRANSACTIONS,
+      employees: INITIAL_EMPLOYEES,
+      users: INITIAL_USERS,
+      loans: INITIAL_LOANS,
+      dashboardConfig: DEFAULT_DASHBOARD_CONFIG,
+    });
 
     logAudit('Reset Sample Data', 'SETTINGS', 'Sistem di-reset ke sample database default');
     showToast('Data sistem gudang GA telah dimuat ulang sesuai master data awal.', 'info');
@@ -857,20 +975,22 @@ export default function App() {
                     <span className="text-[9px] sm:text-[10px] font-black bg-blue-500/25 text-blue-300 border border-blue-400/30 px-1 sm:px-1.5 py-0.2 rounded font-mono shadow-xs shrink-0">
                       PRO
                     </span>
-                    <span
+                    <button
+                      type="button"
+                      onClick={handleManualRefreshCloud}
                       title={
                         syncState === 'connected'
-                          ? 'Tersinkronisasi Cloud Firestore secara Real-Time'
+                          ? 'Tersinkronisasi Cloud Firestore secara Real-Time. Klik untuk sinkronisasi paksa.'
                           : syncState === 'syncing'
                           ? 'Sedang menyimpan perubahan ke Cloud...'
-                          : 'Mode Offline - Data tersimpan aman di penyimpanan lokal browser'
+                          : 'Mode Offline - Klik untuk mencoba menyambungkan ulang ke Cloud'
                       }
-                      className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 transition-colors ${
+                      className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                         syncState === 'connected'
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30 hover:bg-emerald-500/30'
                           : syncState === 'syncing'
                           ? 'bg-blue-500/20 text-blue-300 border-blue-400/30 animate-pulse'
-                          : 'bg-amber-500/20 text-amber-300 border-amber-400/30'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-400/30 hover:bg-amber-500/30'
                       }`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full ${
@@ -879,7 +999,8 @@ export default function App() {
                       <span className="hidden sm:inline">
                         {syncState === 'connected' ? 'Cloud Sync' : syncState === 'syncing' ? 'Syncing...' : 'Lokal'}
                       </span>
-                    </span>
+                      <RefreshCw className={`w-2.5 h-2.5 opacity-75 ml-0.5 ${syncState === 'syncing' ? 'animate-spin' : ''}`} />
+                    </button>
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-300/90 font-medium hidden md:block truncate">
                     {dashboardConfig.companySubtitle || 'General Affairs Inventory & Barcode Control System'}
