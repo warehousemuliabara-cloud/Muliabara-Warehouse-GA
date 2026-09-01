@@ -6,15 +6,14 @@ import {
   setDoc, 
   getDoc,
   onSnapshot,
-  setLogLevel,
-  persistentLocalCache,
-  persistentMultipleTabManager
+  setLogLevel
 } from 'firebase/firestore';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Configure log level to suppress benign connection polling notices
+// Suppress Firestore benign polling and retry log noise in console
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {
   // Ignore in case environment restricts logLevel
 }
@@ -22,16 +21,24 @@ try {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const dbId = (firebaseConfig as any).firestoreDatabaseId;
 
-// Initialize Firestore with auto-detect long polling and multi-tab persistent cache
+// Initialize Firebase Anonymous Auth for seamless cross-origin Netlify access
+try {
+  const auth = getAuth(app);
+  signInAnonymously(auth).catch((err) => {
+    // Non-blocking in case auth is not enabled
+    console.debug('Firebase Auth status:', err?.message);
+  });
+} catch {
+  // Safe
+}
+
+// Initialize Firestore with robust Long-Polling (ensures reliable connection across mobile networks & Netlify)
 let firestoreInstance: ReturnType<typeof getFirestore>;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      experimentalAutoDetectLongPolling: true,
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
+      experimentalForceLongPolling: true,
     },
     dbId || undefined
   );
