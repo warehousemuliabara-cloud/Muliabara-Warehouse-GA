@@ -79,6 +79,7 @@ import {
   pushWarehouseSync, 
   fetchFreshWarehouseData,
   subscribeToCrossTabSync,
+  smartMergeWarehouseData,
   onSyncStatusChange, 
   SyncState,
   WarehouseSyncPayload 
@@ -222,8 +223,23 @@ export default function App() {
     localStorage.setItem('ga_warehouse_is_logged_in', 'false');
   };
 
-  // Active navigation tab
-  const [activeTab, setActiveTab] = useState<MainTabType>('dashboard');
+  // Active navigation tab with persistence so inspections never get lost/reset
+  const [activeTab, setActiveTab] = useState<MainTabType>(() => {
+    try {
+      const saved = localStorage.getItem('ga_warehouse_active_tab');
+      if (saved && ['dashboard', 'request', 'incoming', 'stock', 'loans', 'transactions'].includes(saved)) {
+        return saved as MainTabType;
+      }
+    } catch {}
+    return 'dashboard';
+  });
+
+  const handleTabChange = (tab: MainTabType) => {
+    setActiveTab(tab);
+    try {
+      localStorage.setItem('ga_warehouse_active_tab', tab);
+    } catch {}
+  };
 
   // Modals state
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -261,43 +277,86 @@ export default function App() {
   const isInitialCloudLoaded = useRef<boolean>(false);
   const isRemoteUpdate = useRef<boolean>(false);
 
-  // Helper to immediately push latest state to Cloud Firestore
+  // Keep fresh state references for real-time listeners and multi-tab broadcasts
+  const latestStateRef = useRef({
+    items,
+    transactions,
+    employees,
+    users,
+    loans,
+    auditLogs,
+    rolePermissions,
+    dashboardConfig,
+    currentUser,
+  });
+
+  useEffect(() => {
+    latestStateRef.current = {
+      items,
+      transactions,
+      employees,
+      users,
+      loans,
+      auditLogs,
+      rolePermissions,
+      dashboardConfig,
+      currentUser,
+    };
+  }, [items, transactions, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser]);
+
+  // Helper to immediately push latest state to Cloud Firestore with smart-merge safety
   const syncToCloud = (overrides?: Partial<WarehouseSyncPayload>) => {
+    const current = latestStateRef.current;
     const payload: Partial<WarehouseSyncPayload> & { updatedBy: string } = {
-      items: overrides?.items || items,
-      transactions: overrides?.transactions || transactions,
-      employees: overrides?.employees || employees,
-      users: overrides?.users || users,
-      loans: overrides?.loans || loans,
-      auditLogs: overrides?.auditLogs || auditLogs,
-      rolePermissions: overrides?.rolePermissions || rolePermissions,
-      dashboardConfig: overrides?.dashboardConfig || dashboardConfig,
-      updatedBy: currentUser?.fullName || 'Sistem',
+      items: overrides?.items || current.items,
+      transactions: overrides?.transactions || current.transactions,
+      employees: overrides?.employees || current.employees,
+      users: overrides?.users || current.users,
+      loans: overrides?.loans || current.loans,
+      auditLogs: overrides?.auditLogs || current.auditLogs,
+      rolePermissions: overrides?.rolePermissions || current.rolePermissions,
+      dashboardConfig: overrides?.dashboardConfig || current.dashboardConfig,
+      updatedBy: current.currentUser?.fullName || 'Sistem',
     };
     pushWarehouseSync(payload).catch((err) => {
       console.warn('Immediate Firestore sync error:', err?.message);
     });
   };
 
-  // Manual refresh from Cloud button handler
+  // Manual refresh from Cloud button handler (Smart Merged - Never wipes local transactions!)
   const handleManualRefreshCloud = async () => {
     showToast('Menghubungkan & menyinkronkan data Cloud Firestore...', 'info');
     try {
-      const cloudData = await fetchFreshWarehouseData();
-      if (cloudData) {
+      const current = latestStateRef.current;
+      const localSnapshot = {
+        items: current.items,
+        transactions: current.transactions,
+        employees: current.employees,
+        users: current.users,
+        loans: current.loans,
+        auditLogs: current.auditLogs,
+        rolePermissions: current.rolePermissions,
+        dashboardConfig: current.dashboardConfig,
+        updatedBy: current.currentUser.fullName,
+      };
+      const mergedData = await fetchFreshWarehouseData(localSnapshot);
+      if (mergedData) {
         isRemoteUpdate.current = true;
-        if (cloudData.items && Array.isArray(cloudData.items)) setItems(cloudData.items);
-        if (cloudData.transactions && Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
-        if (cloudData.employees && Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
-        if (cloudData.users && Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
-        if (cloudData.loans && Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
-        if (cloudData.auditLogs && Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
-        if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
-        if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
+        if (Array.isArray(mergedData.items)) setItems(mergedData.items);
+        if (Array.isArray(mergedData.transactions)) setTransactions(mergedData.transactions);
+        if (Array.isArray(mergedData.employees)) setEmployees(mergedData.employees);
+        if (Array.isArray(mergedData.users)) setUsers(sanitizeUsersList(mergedData.users));
+        if (Array.isArray(mergedData.loans)) setLoans(mergedData.loans);
+        if (Array.isArray(mergedData.auditLogs)) setAuditLogs(mergedData.auditLogs);
+        if (mergedData.rolePermissions) setRolePermissions(mergedData.rolePermissions);
+        if (mergedData.dashboardConfig) setDashboardConfig(mergedData.dashboardConfig);
         isInitialCloudLoaded.current = true;
-        showToast('Data Cloud berhasil disinkronkan & diperbarui!', 'success');
+        showToast(
+          `Sinkronisasi Cloud berhasil! ${mergedData.transactions?.length || 0} transaksi & ${mergedData.items?.length || 0} barang aman.`,
+          'success'
+        );
       } else {
-        showToast('Tidak ada data baru di Cloud, data lokal sudah mutakhir.', 'info');
+        showToast('Data lokal sudah tersimpan & terbarui di Cloud.', 'info');
       }
     } catch (err: any) {
       showToast('Gagal memuat dari Cloud: ' + (err?.message || 'Koneksi offline'), 'warning');
@@ -314,17 +373,32 @@ export default function App() {
 
   // 1. Subscribe to instant cross-tab broadcast (0ms multi-account sync e.g. Wardhana -> Master Admin)
   useEffect(() => {
-    const unsubscribeCrossTab = subscribeToCrossTabSync((data) => {
-      if (data) {
+    const unsubscribeCrossTab = subscribeToCrossTabSync((incomingData) => {
+      if (incomingData) {
         isRemoteUpdate.current = true;
-        if (data.items && Array.isArray(data.items)) setItems(data.items);
-        if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
-        if (data.employees && Array.isArray(data.employees)) setEmployees(data.employees);
-        if (data.users && Array.isArray(data.users)) setUsers(sanitizeUsersList(data.users));
-        if (data.loans && Array.isArray(data.loans)) setLoans(data.loans);
-        if (data.auditLogs && Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
-        if (data.rolePermissions) setRolePermissions(data.rolePermissions);
-        if (data.dashboardConfig) setDashboardConfig(data.dashboardConfig);
+        const current = latestStateRef.current;
+        const merged = smartMergeWarehouseData(
+          {
+            items: current.items,
+            transactions: current.transactions,
+            employees: current.employees,
+            users: current.users,
+            loans: current.loans,
+            auditLogs: current.auditLogs,
+            rolePermissions: current.rolePermissions,
+            dashboardConfig: current.dashboardConfig,
+          },
+          incomingData
+        );
+
+        if (Array.isArray(merged.items)) setItems(merged.items);
+        if (Array.isArray(merged.transactions)) setTransactions(merged.transactions);
+        if (Array.isArray(merged.employees)) setEmployees(merged.employees);
+        if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
+        if (Array.isArray(merged.loans)) setLoans(merged.loans);
+        if (Array.isArray(merged.auditLogs)) setAuditLogs(merged.auditLogs);
+        if (merged.rolePermissions) setRolePermissions(merged.rolePermissions);
+        if (merged.dashboardConfig) setDashboardConfig(merged.dashboardConfig);
       }
     });
 
@@ -333,18 +407,48 @@ export default function App() {
       if (e.key === STORAGE_KEY_TRANSACTIONS && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) setTransactions(parsed);
+          if (Array.isArray(parsed)) {
+            const current = latestStateRef.current;
+            const merged = smartMergeWarehouseData({ transactions: current.transactions }, { transactions: parsed });
+            setTransactions(merged.transactions);
+          }
         } catch {}
       }
       if (e.key === STORAGE_KEY_ITEMS && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) setItems(parsed);
+          if (Array.isArray(parsed)) {
+            const current = latestStateRef.current;
+            const merged = smartMergeWarehouseData({ items: current.items }, { items: parsed });
+            setItems(merged.items);
+          }
         } catch {}
       }
     };
 
     window.addEventListener('storage', handleStorageChange);
+
+    // Initial cloud fetch on startup to establish connection & pull latest cloud transactions
+    const initStartupSync = async () => {
+      try {
+        const current = latestStateRef.current;
+        await fetchFreshWarehouseData({
+          items: current.items,
+          transactions: current.transactions,
+          employees: current.employees,
+          users: current.users,
+          loans: current.loans,
+          auditLogs: current.auditLogs,
+          rolePermissions: current.rolePermissions,
+          dashboardConfig: current.dashboardConfig,
+          updatedBy: current.currentUser?.fullName || 'Sistem',
+        });
+        isInitialCloudLoaded.current = true;
+      } catch (e) {
+        console.warn('Initial cloud sync notice:', e);
+      }
+    };
+    initStartupSync();
 
     return () => {
       unsubscribeCrossTab();
@@ -354,17 +458,32 @@ export default function App() {
 
   // 2. Subscribe to real-time Firestore database updates across all devices
   useEffect(() => {
-    const unsubscribe = subscribeToWarehouseData((data) => {
-      if (data) {
+    const unsubscribe = subscribeToWarehouseData((cloudData) => {
+      if (cloudData) {
         isRemoteUpdate.current = true;
-        if (data.items && Array.isArray(data.items)) setItems(data.items);
-        if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
-        if (data.employees && Array.isArray(data.employees)) setEmployees(data.employees);
-        if (data.users && Array.isArray(data.users)) setUsers(sanitizeUsersList(data.users));
-        if (data.loans && Array.isArray(data.loans)) setLoans(data.loans);
-        if (data.auditLogs && Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
-        if (data.rolePermissions) setRolePermissions(data.rolePermissions);
-        if (data.dashboardConfig) setDashboardConfig(data.dashboardConfig);
+        const current = latestStateRef.current;
+        const merged = smartMergeWarehouseData(
+          {
+            items: current.items,
+            transactions: current.transactions,
+            employees: current.employees,
+            users: current.users,
+            loans: current.loans,
+            auditLogs: current.auditLogs,
+            rolePermissions: current.rolePermissions,
+            dashboardConfig: current.dashboardConfig,
+          },
+          cloudData
+        );
+
+        if (Array.isArray(merged.items)) setItems(merged.items);
+        if (Array.isArray(merged.transactions)) setTransactions(merged.transactions);
+        if (Array.isArray(merged.employees)) setEmployees(merged.employees);
+        if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
+        if (Array.isArray(merged.loans)) setLoans(merged.loans);
+        if (Array.isArray(merged.auditLogs)) setAuditLogs(merged.auditLogs);
+        if (merged.rolePermissions) setRolePermissions(merged.rolePermissions);
+        if (merged.dashboardConfig) setDashboardConfig(merged.dashboardConfig);
         isInitialCloudLoaded.current = true;
       }
     });
@@ -383,16 +502,17 @@ export default function App() {
     }
 
     const timer = setTimeout(() => {
+      const current = latestStateRef.current;
       pushWarehouseSync({
-        items,
-        transactions,
-        employees,
-        users,
-        loans,
-        auditLogs,
-        rolePermissions,
-        dashboardConfig,
-        updatedBy: currentUser.fullName,
+        items: current.items,
+        transactions: current.transactions,
+        employees: current.employees,
+        users: current.users,
+        loans: current.loans,
+        auditLogs: current.auditLogs,
+        rolePermissions: current.rolePermissions,
+        dashboardConfig: current.dashboardConfig,
+        updatedBy: current.currentUser?.fullName || 'Sistem',
       }).catch((err) => {
         console.warn('Silent Firestore sync error:', err?.message);
       });
@@ -1088,7 +1208,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right: Glossy Quick Actions, Notification Bell, Role & Action Icons (Mobile Responsive) */}
+            {/* Right: Glossy Quick Actions, Notification Bell, Role & Action Icons (Mobile Responsive & No Overlap) */}
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {/* Glossy Notification Bell with Instant Approval Trigger */}
               <button
@@ -1105,12 +1225,12 @@ export default function App() {
                 )}
               </button>
 
-              {/* Active User Role Glossy Pill */}
+              {/* Active User Role Glossy Pill (Hidden on Mobile because it's placed in SubHeaderNavigation beside Dashboard) */}
               <button
                 type="button"
                 onClick={() => setIsRoleSwitcherOpen(true)}
                 title="Kelola Akun & Ganti Role"
-                className="relative p-1.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/15 border border-white/20 shadow-sm backdrop-blur-xs flex items-center gap-1.5 transition-all cursor-pointer text-left group shrink-0"
+                className="hidden md:flex relative p-1.5 sm:px-2.5 sm:py-1 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/15 border border-white/20 shadow-sm backdrop-blur-xs items-center gap-1.5 transition-all cursor-pointer text-left group shrink-0"
               >
                 <div className={`w-5 h-5 sm:w-5.5 sm:h-5.5 rounded-md flex items-center justify-center font-black text-[10px] shadow-inner shrink-0 ${
                   currentUser.role === 'MASTER_ADMIN' 
@@ -1137,35 +1257,35 @@ export default function App() {
                 </div>
               </button>
 
-              {/* Header Icon: Google Sheets Sync & Export */}
+              {/* Header Icon: Google Sheets Sync & Export (Hidden on Mobile, available in Drawer/SubHeader) */}
               <button
                 type="button"
                 onClick={() => setIsGoogleSheetsModalOpen(true)}
                 title="Integrasi Google Sheets (Ekspor Laporan & Impor Stok)"
-                className="p-1.5 sm:p-2 text-slate-200 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/30 rounded-lg sm:rounded-xl border border-emerald-400/30 shadow-sm transition-all cursor-pointer flex items-center gap-1 sm:gap-1.5 text-xs font-semibold shrink-0"
+                className="hidden lg:flex p-1.5 sm:p-2 text-slate-200 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/30 rounded-lg sm:rounded-xl border border-emerald-400/30 shadow-sm transition-all cursor-pointer items-center gap-1 sm:gap-1.5 text-xs font-semibold shrink-0"
               >
                 <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
                 <span className="hidden xl:inline">Google Sheets</span>
               </button>
 
-              {/* Header Icon: Personil Database */}
+              {/* Header Icon: Personil Database (Hidden on Mobile, placed beside Dashboard in SubHeader) */}
               <button
                 type="button"
                 onClick={() => setIsEmployeeModalOpen(true)}
                 title={`Database Personil (${employees.length} Karyawan)`}
-                className="p-1.5 sm:p-2 text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 shadow-sm transition-all cursor-pointer flex items-center gap-1 sm:gap-1.5 text-xs font-semibold shrink-0"
+                className="hidden md:flex p-1.5 sm:p-2 text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 shadow-sm transition-all cursor-pointer items-center gap-1 sm:gap-1.5 text-xs font-semibold shrink-0"
               >
                 <Users className="w-4 h-4 text-emerald-300" />
                 <span className="hidden xl:inline">Personil ({employees.length})</span>
               </button>
 
-              {/* Header Icon: Dashboard & Branding Settings (Master Admin Only) */}
+              {/* Header Icon: Dashboard & Branding Settings (Master Admin Only, hidden on Mobile) */}
               {currentUser.role === 'MASTER_ADMIN' && (
                 <button
                   type="button"
                   onClick={() => setIsSettingsModalOpen(true)}
                   title="Konfigurasi Dashboard, Tema & Logo (Khusus Master Admin)"
-                  className="p-1.5 sm:p-2 text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 shadow-sm transition-all cursor-pointer shrink-0"
+                  className="hidden md:block p-1.5 sm:p-2 text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg sm:rounded-xl border border-white/15 shadow-sm transition-all cursor-pointer shrink-0"
                 >
                   <SlidersHorizontal className="w-4 h-4 text-blue-300" />
                 </button>
@@ -1199,13 +1319,15 @@ export default function App() {
       {/* 2. Sub-Header Navigation Bar (Placed directly under the header as requested) */}
       <SubHeaderNavigation
         activeTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
+        onTabChange={handleTabChange}
         lowStockCount={lowStockCount}
         activeLoansCount={activeLoansCount}
         pendingApprovalsCount={pendingApprovalsCount}
         currentUser={currentUser}
+        employeeCount={employees.length}
         onOpenEmployeeModal={() => setIsEmployeeModalOpen(true)}
         onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
+        onOpenGoogleSheets={() => setIsGoogleSheetsModalOpen(true)}
       />
 
       {/* Mobile Drawer Navigation */}

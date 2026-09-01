@@ -7,29 +7,18 @@ import {
   HandHelping, 
   ShieldCheck, 
   Image as ImageIcon, 
-  Clock, 
   Lock,
   ArrowRight,
-  ChevronLeft,
-  ChevronRight,
   Calendar,
-  Sparkles,
   QrCode,
   Printer,
   ChevronDown,
   Layers,
-  CheckCircle2,
   CalendarDays,
-  Filter,
   BarChart3,
   TrendingUp,
   TrendingDown,
-  Store,
-  Boxes,
-  ClipboardCheck,
-  MoreVertical,
-  SlidersHorizontal,
-  Users
+  MoreVertical
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -88,7 +77,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const totalItemsCount = items.length;
   const totalPhysicalStock = items.reduce((acc, item) => acc + item.currentStock, 0);
   const lowStockItems = items.filter((item) => item.currentStock <= item.minStock);
-  const outOfStockItems = items.filter((item) => item.currentStock <= 0);
 
   const outTransactions = transactions.filter((t) => t.type === 'OUT');
   const inTransactions = transactions.filter((t) => t.type === 'IN');
@@ -124,78 +112,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  // -------------------------------------------------------------
-  // Requirement 1: Selectable Date for Mutasi & Transaksi Terkini
-  // -------------------------------------------------------------
-  const uniqueDates = useMemo(() => {
-    const datesSet = new Set<string>();
-    transactions.forEach((t) => {
-      if (t.timestamp) {
-        const d = t.timestamp.split(' ')[0] || t.timestamp.split('T')[0];
-        if (d) datesSet.add(d);
-      } else if (t.date) {
-        datesSet.add(t.date);
-      }
-    });
-
-    const sorted = Array.from(datesSet).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    if (sorted.length === 0) {
-      sorted.push(new Date().toISOString().split('T')[0]);
-    }
-    return sorted;
-  }, [transactions]);
-
-  // Selected date string (e.g., '2026-08-30' or 'ALL')
-  const [selectedDate, setSelectedDate] = useState<string>(() => uniqueDates[0] || new Date().toISOString().split('T')[0]);
-
-  // Current active date index for next/previous navigation
-  const activeDateIdx = uniqueDates.indexOf(selectedDate);
-
-  const handleNextDate = () => {
-    if (activeDateIdx > 0) {
-      setSelectedDate(uniqueDates[activeDateIdx - 1]);
-    }
-  };
-
-  const handlePrevDate = () => {
-    if (activeDateIdx >= 0 && activeDateIdx < uniqueDates.length - 1) {
-      setSelectedDate(uniqueDates[activeDateIdx + 1]);
-    }
-  };
-
-  const handleTodayClick = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (uniqueDates.includes(todayStr)) {
-      setSelectedDate(todayStr);
-    } else {
-      setSelectedDate(uniqueDates[0]);
-    }
-  };
-
-  const transactionsOnSelectedDate = useMemo(() => {
-    if (selectedDate === 'ALL') return (transactions || []).slice(0, 15);
-    return (transactions || []).filter((t) => {
-      const trxDate = (t.timestamp ? (t.timestamp.split(' ')[0] || t.timestamp.split('T')[0]) : t.date) || '';
-      return trxDate === selectedDate;
-    });
-  }, [transactions, selectedDate]);
-
-  const formatDisplayDate = (dateStr: string) => {
-    if (dateStr === 'ALL') return 'Semua Tanggal Transaksi';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString('id-ID', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-    } catch {
-      return dateStr;
-    }
-  };
 
   // -------------------------------------------------------------
   // Data for Operation Overview Area Chart (Dual Spline Waves)
@@ -487,11 +403,11 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 )}
               </div>
 
-              <h1 className="text-base sm:text-lg font-black text-white tracking-tight truncate">
-                {config.appName || 'GA Warehouse Muliabara'} — Monitoring & Control
+              <h1 className="text-xs sm:text-base md:text-lg font-black text-white tracking-tight leading-tight">
+                {config.appName || 'WAREHOUSE KBCT'} — Monitoring & Control
               </h1>
-              <p className="text-xs text-slate-300 line-clamp-1">
-                {config.companySubtitle || 'General Affairs Inventory & Barcode Control System'} • Pengawasan Terpusat Permintaan, Penerimaan, dan Peminjaman
+              <p className="text-[10px] sm:text-[11px] md:text-xs text-slate-300 leading-snug line-clamp-2 md:line-clamp-1">
+                {config.companySubtitle || 'General Affairs Inventory & Barcode Control System'} • Pengawasan Terpusat Permintaan
               </p>
             </div>
           </div>
@@ -682,22 +598,22 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. TOP 4 KPI CARDS (MATCHING THE REFERENCE SCREENSHOT FORMAT)            */}
+      {/* 2. TOP 4 KPI CARDS (COMPACT & SMALLER TYPOGRAPHY AS REQUESTED)            */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         {/* Card 1: Master Stok */}
         <div
           onClick={onNavigateToStock}
-          className="bg-white p-4 rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-md hover:border-blue-200 transition-all cursor-pointer flex items-center gap-3.5 group"
+          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-blue-300 transition-all cursor-pointer flex items-center gap-2.5 group"
         >
-          <div className="w-12 h-12 rounded-2xl bg-blue-50/90 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <Package className="w-6 h-6" />
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <Package className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Master Stok (SKU)</p>
-            <div className="text-xl font-black text-slate-900 leading-snug">{totalItemsCount} SKU</div>
-            <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-bold mt-0.5">
-              <TrendingUp className="w-3 h-3" />
+            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Master Stok</p>
+            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{totalItemsCount} SKU</div>
+            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">
+              <TrendingUp className="w-2.5 h-2.5 shrink-0" />
               <span>↑ 12.8%</span>
               <span className="text-slate-400 font-normal truncate">• {totalPhysicalStock.toLocaleString()} unit</span>
             </div>
@@ -707,16 +623,16 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         {/* Card 2: Permintaan Keluar */}
         <div
           onClick={onNavigateToRequest}
-          className="bg-white p-4 rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-md hover:border-rose-200 transition-all cursor-pointer flex items-center gap-3.5 group"
+          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-rose-300 transition-all cursor-pointer flex items-center gap-2.5 group"
         >
-          <div className="w-12 h-12 rounded-2xl bg-rose-50/90 text-rose-600 border border-rose-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <ArrowUpRight className="w-6 h-6 stroke-[2.5]" />
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-rose-50 text-rose-600 border border-rose-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <ArrowUpRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Barang Keluar</p>
-            <div className="text-xl font-black text-slate-900 leading-snug">{outTransactions.length} Mutasi</div>
-            <div className="flex items-center gap-1.5 text-[11px] text-rose-600 font-bold mt-0.5">
-              <TrendingDown className="w-3 h-3" />
+            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Barang Keluar</p>
+            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{outTransactions.length} Mutasi</div>
+            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-rose-600 font-semibold mt-0.5 truncate">
+              <TrendingDown className="w-2.5 h-2.5 shrink-0" />
               <span>↓ 8.6%</span>
               <span className="text-slate-400 font-normal truncate">
                 {pendingApprovals.length > 0 ? `• ${pendingApprovals.length} pending` : '• Serah terima'}
@@ -728,16 +644,16 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         {/* Card 3: Peminjaman Alat / Tim */}
         <div
           onClick={onNavigateToLoans}
-          className="bg-white p-4 rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-md hover:border-purple-200 transition-all cursor-pointer flex items-center gap-3.5 group"
+          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-purple-300 transition-all cursor-pointer flex items-center gap-2.5 group"
         >
-          <div className="w-12 h-12 rounded-2xl bg-purple-50/90 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <HandHelping className="w-6 h-6" />
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <HandHelping className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Peminjaman Alat</p>
-            <div className="text-xl font-black text-slate-900 leading-snug">{activeLoans.length} Dipinjam</div>
-            <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-bold mt-0.5">
-              <TrendingUp className="w-3 h-3" />
+            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Peminjaman Alat</p>
+            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{activeLoans.length} Dipinjam</div>
+            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-purple-600 font-semibold mt-0.5 truncate">
+              <TrendingUp className="w-2.5 h-2.5 shrink-0" />
               <span>↑ 6.3%</span>
               <span className="text-slate-400 font-normal truncate">• Toolkit aktif</span>
             </div>
@@ -747,16 +663,16 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         {/* Card 4: Penerimaan Barang Masuk */}
         <div
           onClick={onNavigateToIncoming}
-          className="bg-white p-4 rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-md hover:border-emerald-200 transition-all cursor-pointer flex items-center gap-3.5 group"
+          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-emerald-300 transition-all cursor-pointer flex items-center gap-2.5 group"
         >
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50/90 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <ArrowDownLeft className="w-6 h-6 stroke-[2.5]" />
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <ArrowDownLeft className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Penerimaan Masuk</p>
-            <div className="text-xl font-black text-slate-900 leading-snug">{inTransactions.length} Inbound</div>
-            <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-bold mt-0.5">
-              <TrendingUp className="w-3 h-3" />
+            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Penerimaan Masuk</p>
+            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{inTransactions.length} Inbound</div>
+            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">
+              <TrendingUp className="w-2.5 h-2.5 shrink-0" />
               <span>↑ 15.7%</span>
               <span className="text-slate-400 font-normal truncate">• Restock supplier</span>
             </div>
@@ -1117,312 +1033,67 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. WORKFLOW PIPELINE BAR (MATCHING THE BOTTOM ROW IN REFERENCE IMAGE)    */}
+      {/* 4. COMPACT & NARROW LOW STOCK ALERT (3 ROWS MAXIMUM)                      */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
-        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">
-          Alur Navigasi Cepat & Manajemen Operasional Gudang:
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 items-center">
-          {/* Step 1: Trend Mutasi */}
-          <div
-            onClick={onOpenStatsReport}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/80 border border-slate-200/70 hover:border-blue-300 transition-all cursor-pointer flex items-center justify-between group"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="font-bold text-xs text-slate-800">Trend Mutasi</p>
-                <p className="text-[10px] text-slate-400">Analisis volume</p>
-              </div>
+      <div className="max-w-2xl bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+        {/* Compact Header */}
+        <div className="px-3 py-2 bg-slate-900 text-white flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded bg-amber-400/20 text-amber-300 flex items-center justify-center">
+              <AlertTriangle className="w-3 h-3" />
             </div>
-            <span className="text-slate-300 group-hover:text-blue-500 text-xs">➔</span>
+            <h3 className="font-bold text-xs text-slate-100">Peringatan Stok Rendah</h3>
           </div>
-
-          {/* Step 2: Lokasi & Rak */}
-          <div
-            onClick={onNavigateToStock}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-purple-50/80 border border-slate-200/70 hover:border-purple-300 transition-all cursor-pointer flex items-center justify-between group"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Store className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="font-bold text-xs text-slate-800">Lokasi & Rak</p>
-                <p className="text-[10px] text-slate-400">Peta simpan barang</p>
-              </div>
-            </div>
-            <span className="text-slate-300 group-hover:text-purple-500 text-xs">➔</span>
-          </div>
-
-          {/* Step 3: SKU Master */}
-          <div
-            onClick={onNavigateToStock}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-indigo-50/80 border border-slate-200/70 hover:border-indigo-300 transition-all cursor-pointer flex items-center justify-between group"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Boxes className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="font-bold text-xs text-slate-800">SKU Master</p>
-                <p className="text-[10px] text-slate-400">Katalog inventaris</p>
-              </div>
-            </div>
-            <span className="text-slate-300 group-hover:text-indigo-500 text-xs">➔</span>
-          </div>
-
-          {/* Step 4: Inventory / Audit */}
-          <div
-            onClick={onNavigateToTransactions}
-            className="p-3 rounded-xl bg-slate-50 hover:bg-emerald-50/80 border border-slate-200/70 hover:border-emerald-300 transition-all cursor-pointer flex items-center justify-between group"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <ClipboardCheck className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="font-bold text-xs text-slate-800">Audit Log</p>
-                <p className="text-[10px] text-slate-400">Riwayat transaksi</p>
-              </div>
-            </div>
-            <span className="text-slate-300 group-hover:text-emerald-500 text-xs">✓</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 5. BOTTOM GRID: PERINGATAN STOK RENDAH & MUTASI TRANSAKSI DENGAN KALENDER */}
-      {/* ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-        {/* Left Column: Low Stock Items Alert */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-hidden flex flex-col">
-          <div className="p-3.5 bg-slate-900 text-white flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-amber-400/20 text-amber-300 flex items-center justify-center">
-                <AlertTriangle className="w-3.5 h-3.5" />
-              </div>
-              <h3 className="font-bold text-xs sm:text-sm text-slate-100">Peringatan Stok Rendah</h3>
-            </div>
-            <span className="text-[10px] bg-rose-500/30 text-rose-200 border border-rose-400/30 px-2 py-0.5 rounded-full font-mono font-bold">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] bg-rose-500/30 text-rose-200 border border-rose-400/30 px-1.5 py-0.2 rounded font-mono font-bold">
               {lowStockItems.length} item
             </span>
-          </div>
-
-          <div className="p-3 divide-y divide-slate-100 overflow-y-auto max-h-[320px] flex-1">
-            {lowStockItems.length === 0 ? (
-              <div className="py-12 text-center text-slate-600">
-                <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-                <p className="text-xs font-bold text-slate-800">Semua Stok Kondisi Aman</p>
-                <p className="text-[11px] text-slate-500">Tidak ada barang di bawah batas minimum</p>
-              </div>
-            ) : (
-              (lowStockItems || []).slice(0, 8).map((item) => (
-                <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
-                  <div className="truncate pr-2">
-                    <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">
-                      {item.code} • Rak: {item.rackLocation}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0 flex items-center gap-2">
-                    <span className="text-xs font-extrabold text-rose-600">
-                      {item.currentStock} / {item.minStock} {item.unit}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onScanItemForRequest(item)}
-                      title="Ambil barang"
-                      className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white rounded-md text-[10px] font-bold transition-colors cursor-pointer"
-                    >
-                      Ambil
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="p-2.5 bg-slate-50 border-t border-slate-100 text-center">
             <button
               type="button"
               onClick={onNavigateToStock}
-              className="text-xs font-bold text-blue-600 hover:underline flex items-center justify-center gap-1 mx-auto cursor-pointer"
+              className="text-[10px] font-semibold text-blue-300 hover:text-white flex items-center gap-0.5 cursor-pointer"
             >
-              <span>Lihat Semua Master Data Stok</span>
-              <ArrowRight className="w-3 h-3" />
+              <span>Semua</span>
+              <ArrowRight className="w-2.5 h-2.5" />
             </button>
           </div>
         </div>
 
-        {/* Right Column: Mutasi & Transaksi Terkini with Date Picker */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-hidden flex flex-col">
-          {/* Header with Date Picker & Navigation */}
-          <div className="p-3.5 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-xs sm:text-sm text-slate-100">Mutasi & Transaksi Terkini</h3>
-                <p className="text-[10px] text-slate-400">Pilih tanggal untuk melihat riwayat serah terima</p>
-              </div>
+        {/* 3 Compact Rows of Low Stock Items */}
+        <div className="p-2 divide-y divide-slate-100">
+          {lowStockItems.length === 0 ? (
+            <div className="py-3 text-center text-slate-600 flex items-center justify-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <span className="text-xs font-semibold text-slate-700">Semua stok aman (di atas batas minimum)</span>
             </div>
-
-            {/* Interactive Selectable Date Picker Toolbar */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-slate-800 p-1.5 rounded-xl border border-slate-700">
-              <button
-                type="button"
-                onClick={handlePrevDate}
-                disabled={activeDateIdx >= uniqueDates.length - 1 || activeDateIdx === -1}
-                title="Hari Sebelumnya"
-                className="p-1 rounded-lg hover:bg-slate-700 disabled:opacity-30 text-slate-300 hover:text-white cursor-pointer disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              <div className="relative flex items-center">
-                <input
-                  type="date"
-                  id="transaction-date-picker"
-                  value={selectedDate === 'ALL' ? '' : selectedDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedDate(e.target.value);
-                    }
-                  }}
-                  className="bg-slate-700 text-amber-300 font-bold text-xs rounded-lg px-2.5 py-1 border border-slate-600 focus:ring-2 focus:ring-blue-500 focus:outline-hidden cursor-pointer"
-                />
-              </div>
-
-              <select
-                id="transaction-date-dropdown"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="bg-slate-700 text-slate-200 font-semibold text-xs rounded-lg px-2 py-1 border border-slate-600 focus:ring-2 focus:ring-blue-500 focus:outline-hidden cursor-pointer"
-              >
-                <option value="ALL">Semua Tanggal</option>
-                {uniqueDates.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={handleNextDate}
-                disabled={activeDateIdx <= 0}
-                title="Hari Berikutnya"
-                className="p-1 rounded-lg hover:bg-slate-700 disabled:opacity-30 text-slate-300 hover:text-white cursor-pointer disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTodayClick}
-                className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded-md transition-colors cursor-pointer"
-              >
-                Terbaru
-              </button>
-            </div>
-          </div>
-
-          {/* Active Date Banner */}
-          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1.5 text-slate-700 font-semibold">
-              <Calendar className="w-3.5 h-3.5 text-blue-600" />
-              <span>Tanggal Aktif: <b className="text-slate-900">{formatDisplayDate(selectedDate)}</b></span>
-            </div>
-            <span className="text-[11px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
-              {transactionsOnSelectedDate.length} Catatan
-            </span>
-          </div>
-
-          {/* Transaction List */}
-          <div className="p-3 divide-y divide-slate-100 overflow-y-auto max-h-[290px] flex-1">
-            {transactionsOnSelectedDate.length === 0 ? (
-              <div className="py-12 text-center text-slate-500 text-xs">
-                <CalendarDays className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                Tidak ada mutasi transaksi tercatat pada tanggal <b>{formatDisplayDate(selectedDate)}</b>.
-                <div className="mt-3">
+          ) : (
+            (lowStockItems || []).slice(0, 3).map((item) => (
+              <div key={item.id} className="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50 rounded">
+                <div className="min-w-0 flex-1 truncate pr-2">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
+                    <span className="text-[9px] text-slate-400 font-mono shrink-0">({item.code})</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Rak: <span className="font-medium text-slate-700">{item.rackLocation || '-'}</span>
+                  </p>
+                </div>
+                <div className="text-right shrink-0 flex items-center gap-2">
+                  <div className="text-[11px] font-extrabold text-rose-600 font-mono">
+                    {item.currentStock} <span className="text-[10px] text-slate-400 font-normal">/ {item.minStock} {item.unit}</span>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedDate(uniqueDates[0])}
-                    className="px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold rounded-lg transition-colors cursor-pointer"
+                    onClick={() => onScanItemForRequest(item)}
+                    title="Minta barang ini"
+                    className="px-2 py-0.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 rounded text-[10px] font-bold transition-colors cursor-pointer"
                   >
-                    Buka tanggal transaksi terbaru ({uniqueDates[0]})
+                    Ambil
                   </button>
                 </div>
               </div>
-            ) : (
-              transactionsOnSelectedDate.map((trx) => {
-                const isOut = trx.type === 'OUT';
-
-                return (
-                  <div key={trx.id} className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50/80 px-2 rounded-lg transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center font-bold ${
-                        isOut ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'
-                      }`}>
-                        {isOut ? <ArrowUpRight className="w-4 h-4 stroke-[2.5]" /> : <ArrowDownLeft className="w-4 h-4 stroke-[2.5]" />}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-extrabold text-xs text-slate-900 truncate">
-                            {isOut ? `Permintaan: ${trx.requesterName || 'Karyawan'}` : `Masuk: ${trx.supplier || 'Restock'}`}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded">
-                            {trx.transactionNumber}
-                          </span>
-                          {trx.status === 'PENDING' && (
-                            <span className="text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-200 px-1.5 py-0.2 rounded">
-                              Belum Approve
-                            </span>
-                          )}
-                          {trx.status === 'APPROVED' && (
-                            <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.2 rounded">
-                              Sudah Approve
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-500 truncate max-w-md mt-0.5">
-                          {trx.items.map((i) => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ')}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <p className="font-mono text-xs font-bold text-slate-900">
-                        {trx.timeFormatted || (trx.timestamp ? trx.timestamp.split(' ')[1] : '-')}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        {trx.dateFormatted || (trx.timestamp ? trx.timestamp.split(' ')[0] : trx.date)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs px-4">
-            <span className="text-slate-500">
-              Total <b>{transactionsOnSelectedDate.length}</b> transaksi pada periode terpilih
-            </span>
-            <button
-              type="button"
-              onClick={onNavigateToTransactions}
-              className="font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
-            >
-              <span>Semua Riwayat Transaksi</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+            ))
+          )}
         </div>
       </div>
     </div>
