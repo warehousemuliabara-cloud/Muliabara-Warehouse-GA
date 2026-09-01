@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Plus, 
@@ -12,11 +12,24 @@ import {
   Building2, 
   UserCheck, 
   AlertTriangle,
-  UserPlus
+  UserPlus,
+  FileSpreadsheet,
+  ArrowUpRight,
+  Zap,
+  RefreshCw,
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 import { Employee } from '../types';
 import { DEPARTMENTS, INITIAL_EMPLOYEES } from '../data/initialData';
 import { ConfirmationModal } from './ConfirmationModal';
+import { 
+  getConnectedSpreadsheetConfig, 
+  syncEmployeesToGoogleSheets, 
+  getGoogleAccessToken, 
+  signInWithGoogleSheets,
+  ConnectedSpreadsheetConfig 
+} from '../utils/googleSheetsService';
 
 interface EmployeeDatabaseModalProps {
   isOpen: boolean;
@@ -26,6 +39,8 @@ interface EmployeeDatabaseModalProps {
   onUpdateEmployee: (employee: Employee) => void;
   onDeleteEmployee: (id: string) => void;
   onResetEmployees: () => void;
+  onOpenGoogleSheets?: () => void;
+  companyName?: string;
 }
 
 export const EmployeeDatabaseModal: React.FC<EmployeeDatabaseModalProps> = ({
@@ -36,11 +51,18 @@ export const EmployeeDatabaseModal: React.FC<EmployeeDatabaseModalProps> = ({
   onUpdateEmployee,
   onDeleteEmployee,
   onResetEmployees,
+  onOpenGoogleSheets,
+  companyName = 'Gudang General Affairs',
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDeptFilter, setSelectedDeptFilter] = useState('ALL');
   const [employeeToDelete, setEmployeeToDelete] = useState<Employee | null>(null);
   
+  // Google sheets sync state
+  const [connectedConfig, setConnectedConfig] = useState<ConnectedSpreadsheetConfig | null>(null);
+  const [isSyncingGSheet, setIsSyncingGSheet] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+
   // Add new employee form state
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState('');
@@ -54,6 +76,36 @@ export const EmployeeDatabaseModal: React.FC<EmployeeDatabaseModalProps> = ({
   const [editName, setEditName] = useState('');
   const [editPosition, setEditPosition] = useState('');
   const [editDept, setEditDept] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setConnectedConfig(getConnectedSpreadsheetConfig());
+      setSyncStatusMsg(null);
+    }
+  }, [isOpen]);
+
+  const handleSyncToSheets = async () => {
+    setIsSyncingGSheet(true);
+    setSyncStatusMsg(null);
+    try {
+      let token = await getGoogleAccessToken();
+      if (!token) {
+        // Prompt login if not available
+        const loginRes = await signInWithGoogleSheets();
+        token = loginRes.accessToken;
+      }
+      
+      const res = await syncEmployeesToGoogleSheets(employees, token, companyName);
+      const updatedConfig = getConnectedSpreadsheetConfig();
+      setConnectedConfig(updatedConfig);
+      setSyncStatusMsg(`Berhasil menyinkronkan ${res.count} personil ke Google Sheets!`);
+    } catch (err: any) {
+      console.error(err);
+      setSyncStatusMsg(`Gagal sinkron: ${err?.message || 'Pastikan izin Google Sheets telah diberikan'}`);
+    } finally {
+      setIsSyncingGSheet(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -154,6 +206,88 @@ export const EmployeeDatabaseModal: React.FC<EmployeeDatabaseModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Google Sheets Sync Banner */}
+        <div className="px-4 py-2.5 bg-emerald-50 border-b border-emerald-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-emerald-600 text-white rounded-lg">
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <span className="font-bold text-emerald-950">Google Sheets Sync: </span>
+              {connectedConfig ? (
+                <span className="text-emerald-800 font-medium">
+                  Terhubung ({connectedConfig.title})
+                  {connectedConfig.lastSyncTime && (
+                    <span className="text-slate-500 text-[11px] ml-1.5">
+                      • Terakhir sync: {new Date(connectedConfig.lastSyncTime).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-slate-600">
+                  Data personil dapat dicatat langsung ke Google Spreadsheet Anda
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {connectedConfig && (
+              <a
+                href={connectedConfig.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 font-bold text-[11px] rounded-lg border border-emerald-300 flex items-center gap-1 shadow-2xs transition-all"
+                title="Buka langsung tab Daftar Karyawan di Google Sheets"
+              >
+                <span>Buka di Google Sheets</span>
+                <ArrowUpRight className="w-3 h-3" />
+              </a>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSyncToSheets}
+              disabled={isSyncingGSheet}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              title="Kirim dan perbarui data seluruh karyawan ke Google Sheets sekarang"
+            >
+              {isSyncingGSheet ? (
+                <RefreshCw className="w-3 h-3 animate-spin" />
+              ) : (
+                <Zap className="w-3 h-3" />
+              )}
+              <span>{isSyncingGSheet ? 'Menyinkronkan...' : '⚡ Sinkronkan Karyawan'}</span>
+            </button>
+
+            {onOpenGoogleSheets && (
+              <button
+                type="button"
+                onClick={onOpenGoogleSheets}
+                className="text-slate-500 hover:text-emerald-700 p-1 rounded hover:bg-emerald-100 text-xs"
+                title="Pengaturan Google Sheets"
+              >
+                ⚙️
+              </button>
+            )}
+          </div>
+        </div>
+
+        {syncStatusMsg && (
+          <div className="px-4 py-2 bg-emerald-100/80 border-b border-emerald-300 text-xs font-semibold text-emerald-900 flex items-center justify-between animate-in fade-in duration-200">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+              <span>{syncStatusMsg}</span>
+            </div>
+            <button
+              onClick={() => setSyncStatusMsg(null)}
+              className="text-slate-500 hover:text-slate-800 text-xs"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Toolbar & Action Stats */}
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row items-center justify-between gap-3">

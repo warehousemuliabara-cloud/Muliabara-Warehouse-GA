@@ -21,6 +21,7 @@ interface ImportExportModalProps {
   onClose: () => void;
   items: Item[];
   onImportItems: (newItems: Item[], mode: 'append' | 'replace') => void;
+  onOpenGoogleSheets?: () => void;
 }
 
 export const ImportExportModal: React.FC<ImportExportModalProps> = ({
@@ -28,6 +29,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   onClose,
   items,
   onImportItems,
+  onOpenGoogleSheets,
 }) => {
   const [activeTab, setActiveTab] = useState<'upload' | 'paste' | 'export'>('upload');
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
@@ -340,6 +342,21 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             <Download className="w-4 h-4" />
             <span>Export Data Stok ({items.length})</span>
           </button>
+
+          {onOpenGoogleSheets && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenGoogleSheets();
+              }}
+              className="ml-auto px-3.5 py-1.5 my-1 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              title="Buka Ekspor & Impor langsung ke Google Sheets"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Google Sheets API</span>
+            </button>
+          )}
         </div>
 
         {/* Modal Content */}

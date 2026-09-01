@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Trash2, CheckCircle2, X, ShieldAlert } from 'lucide-react';
 
 export interface ConfirmationModalProps {
@@ -28,6 +28,18 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 }) => {
   const [typedInput, setTypedInput] = useState('');
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setTypedInput('');
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onCancel]);
+
   if (!isOpen) return null;
 
   const isConfirmedAllowed = !requiresTypingConfirmation || typedInput.trim().toUpperCase() === confirmationString.toUpperCase();
@@ -44,8 +56,15 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+    <div 
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-150"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleCancelClick();
+        }
+      }}
+    >
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden relative z-[71]">
         {/* Modal Header */}
         <div className={`p-4 flex items-center justify-between text-white ${
           isDestructive ? 'bg-rose-700' : 'bg-slate-900'
@@ -59,7 +78,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           <button
             type="button"
             onClick={handleCancelClick}
-            className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+            className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>

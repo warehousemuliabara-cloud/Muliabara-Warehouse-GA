@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Package, 
   Search, 
   Filter, 
   Plus, 
-  PlusCircle,
+  PlusCircle, 
   Edit3, 
   Trash2, 
   AlertTriangle, 
@@ -20,7 +20,10 @@ import {
   ShieldAlert,
   Crown,
   Building2,
-  Sparkles
+  Sparkles,
+  Zap,
+  ArrowUpRight,
+  RefreshCw
 } from 'lucide-react';
 import { Item, Category, UserAccount, UserRole, UserPermissions } from '../types';
 import { CATEGORIES, UNITS, INITIAL_ITEMS } from '../data/initialData';
@@ -28,6 +31,13 @@ import { BarcodeRenderer } from './BarcodeRenderer';
 import { detectCategoryFromName, generateCategorySKU } from '../utils/helpers';
 import { ImportExportModal } from './ImportExportModal';
 import { ConfirmationModal } from './ConfirmationModal';
+import { 
+  getConnectedSpreadsheetConfig, 
+  syncStockToGoogleSheets, 
+  getGoogleAccessToken, 
+  signInWithGoogleSheets,
+  ConnectedSpreadsheetConfig 
+} from '../utils/googleSheetsService';
 
 const WAREHOUSE_LOCATIONS = ['Gudang GA', 'Gudang Kayu'] as const;
 
@@ -43,6 +53,7 @@ interface ItemMasterViewProps {
   onDeleteAllStockItems?: () => void;
   onScanItemForRequest: (item: Item) => void;
   onOpenPrintSheet: () => void;
+  onOpenGoogleSheets?: () => void;
 }
 
 export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
@@ -57,6 +68,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
   onDeleteAllStockItems,
   onScanItemForRequest,
   onOpenPrintSheet,
+  onOpenGoogleSheets,
 }) => {
   // Check role permissions dynamically
   const currentPerms = rolePermissions?.[currentUser.role] || (currentUser.permissions as UserPermissions) || {
@@ -114,6 +126,36 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
     items.forEach((it) => map.set(it.name.toLowerCase().trim(), it));
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [items]);
+
+  // Google Sheets integration state
+  const [connectedConfig, setConnectedConfig] = useState<ConnectedSpreadsheetConfig | null>(null);
+  const [isSyncingStockGSheet, setIsSyncingStockGSheet] = useState(false);
+  const [syncStockFeedback, setSyncStockFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    setConnectedConfig(getConnectedSpreadsheetConfig());
+  }, []);
+
+  const handleQuickSyncStock = async () => {
+    setIsSyncingStockGSheet(true);
+    setSyncStockFeedback(null);
+    try {
+      let token = await getGoogleAccessToken();
+      if (!token) {
+        const loginRes = await signInWithGoogleSheets();
+        token = loginRes.accessToken;
+      }
+      const res = await syncStockToGoogleSheets(items, token);
+      const updatedConfig = getConnectedSpreadsheetConfig();
+      setConnectedConfig(updatedConfig);
+      setSyncStockFeedback(`Berhasil mencatat ${res.count} data stok ke Google Sheets!`);
+    } catch (err: any) {
+      console.error(err);
+      setSyncStockFeedback(`Gagal sinkron: ${err?.message || 'Periksa koneksi Google Sheets'}`);
+    } finally {
+      setIsSyncingStockGSheet(false);
+    }
+  };
 
   const handleSelectDatabaseItem = (selectedKey: string) => {
     setSelectedCatalogItem(selectedKey);
@@ -361,14 +403,55 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
           )}
 
           {canExportImport && (
-            <button
-              type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              className="px-3 py-2 bg-[#E8F5E9] hover:bg-[#A5D6A7] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-[#1B5E20]" />
-              <span>Excel / CSV</span>
-            </button>
+            <>
+              {connectedConfig && (
+                <a
+                  href={connectedConfig.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1 transition-all shadow-2xs"
+                  title={`Buka Google Sheet: ${connectedConfig.title}`}
+                >
+                  <span>Buka Sheet</span>
+                  <ArrowUpRight className="w-3 h-3 text-emerald-600" />
+                </a>
+              )}
+
+              <button
+                type="button"
+                onClick={handleQuickSyncStock}
+                disabled={isSyncingStockGSheet}
+                className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl border border-emerald-500/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                title="Sinkronkan seluruh data stok ke Google Sheets sekarang"
+              >
+                {isSyncingStockGSheet ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Zap className="w-3.5 h-3.5 text-emerald-300" />
+                )}
+                <span>{isSyncingStockGSheet ? 'Menyinkronkan...' : 'Sinkronkan Stok'}</span>
+              </button>
+
+              {onOpenGoogleSheets && (
+                <button
+                  type="button"
+                  onClick={onOpenGoogleSheets}
+                  className="px-3 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-600/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  title="Buka panel Integrasi Google Sheets lengkap"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Google Sheets</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="px-3 py-2 bg-[#E8F5E9] hover:bg-[#A5D6A7] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#1B5E20]" />
+                <span>Excel / CSV</span>
+              </button>
+            </>
           )}
 
           {canPrint && (
@@ -394,6 +477,33 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Feedback Banner for Stock Sync */}
+      {syncStockFeedback && (
+        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-semibold flex items-center justify-between animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>{syncStockFeedback}</span>
+            {connectedConfig && (
+              <a
+                href={connectedConfig.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-700 underline hover:text-emerald-900 ml-2 font-bold inline-flex items-center gap-0.5"
+              >
+                <span>Lihat di Sheet</span>
+                <ArrowUpRight className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+          <button
+            onClick={() => setSyncStockFeedback(null)}
+            className="text-slate-500 hover:text-slate-700 text-xs px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Filter & Search Toolbar */}
       <div className="bg-white p-3.5 sm:p-4 rounded-2xl shadow-xs border border-slate-200/80 space-y-3">
@@ -1025,6 +1135,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         items={items}
+        onOpenGoogleSheets={onOpenGoogleSheets}
         onImportItems={(newItems, mode) => {
           if (onBulkAddItems) {
             onBulkAddItems(newItems, mode);

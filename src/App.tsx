@@ -72,10 +72,13 @@ import { RoleSwitcherModal } from './components/RoleSwitcherModal';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { NotificationApprovalModal } from './components/NotificationApprovalModal';
 import { ProfessionalStatsReportModal } from './components/ProfessionalStatsReportModal';
+import { GoogleSheetsModal } from './components/GoogleSheetsModal';
+import { PublicRequestPortalView } from './components/PublicRequestPortalView';
 import { 
   subscribeToWarehouseData, 
   pushWarehouseSync, 
   fetchFreshWarehouseData,
+  subscribeToCrossTabSync,
   onSyncStatusChange, 
   SyncState,
   WarehouseSyncPayload 
@@ -91,19 +94,17 @@ const STORAGE_KEY_AUDIT = 'ga_warehouse_audit_v8';
 const STORAGE_KEY_CONFIG = 'ga_warehouse_config_v8';
 
 export default function App() {
-  // Helper to ensure all predefined team accounts are present even on fresh devices
-  const getMergedUsers = (savedList: UserAccount[]): UserAccount[] => {
-    const map = new Map<string, UserAccount>();
-    INITIAL_USERS.forEach((u) => map.set(u.username.toLowerCase(), u));
-    if (Array.isArray(savedList)) {
-      savedList.forEach((u) => {
-        if (u && u.username) {
-          const existing = map.get(u.username.toLowerCase());
-          map.set(u.username.toLowerCase(), existing ? { ...existing, ...u } : u);
-        }
-      });
+  // Helper to validate and ensure users list is safe, clean, and retains user deletions
+  const sanitizeUsersList = (savedList: any): UserAccount[] => {
+    if (Array.isArray(savedList) && savedList.length > 0) {
+      const valid = savedList.filter(
+        (u) => u && typeof u === 'object' && u.id && u.username
+      );
+      if (valid.length > 0) {
+        return valid;
+      }
     }
-    return Array.from(map.values());
+    return INITIAL_USERS;
   };
 
   // 1. Core items database
@@ -142,9 +143,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY_USERS) || localStorage.getItem('ga_warehouse_users_v6') || localStorage.getItem('ga_warehouse_users_v7');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return getMergedUsers(parsed);
-        }
+        return sanitizeUsersList(parsed);
       }
       return INITIAL_USERS;
     } catch {
@@ -239,6 +238,16 @@ export default function App() {
   const [isResetSampleConfirmOpen, setIsResetSampleConfirmOpen] = useState(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
+  const [isGoogleSheetsModalOpen, setIsGoogleSheetsModalOpen] = useState(false);
+
+  // Self-Service Public Request Portal state (Accessed via QR Code or URL without login)
+  const [isPublicPortalOpen, setIsPublicPortalOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get('portal') === 'request' || window.location.hash.includes('portal=request');
+    }
+    return false;
+  });
 
   // Cross-modal selected item for request
   const [selectedScannedItem, setSelectedScannedItem] = useState<Item | null>(null);
@@ -280,7 +289,7 @@ export default function App() {
         if (cloudData.items && Array.isArray(cloudData.items)) setItems(cloudData.items);
         if (cloudData.transactions && Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
         if (cloudData.employees && Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
-        if (cloudData.users && Array.isArray(cloudData.users)) setUsers(getMergedUsers(cloudData.users));
+        if (cloudData.users && Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
         if (cloudData.loans && Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
         if (cloudData.auditLogs && Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
         if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
@@ -303,7 +312,47 @@ export default function App() {
     return () => unsubscribeSync();
   }, []);
 
-  // Subscribe to real-time Firestore database updates
+  // 1. Subscribe to instant cross-tab broadcast (0ms multi-account sync e.g. Wardhana -> Master Admin)
+  useEffect(() => {
+    const unsubscribeCrossTab = subscribeToCrossTabSync((data) => {
+      if (data) {
+        isRemoteUpdate.current = true;
+        if (data.items && Array.isArray(data.items)) setItems(data.items);
+        if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
+        if (data.employees && Array.isArray(data.employees)) setEmployees(data.employees);
+        if (data.users && Array.isArray(data.users)) setUsers(sanitizeUsersList(data.users));
+        if (data.loans && Array.isArray(data.loans)) setLoans(data.loans);
+        if (data.auditLogs && Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
+        if (data.rolePermissions) setRolePermissions(data.rolePermissions);
+        if (data.dashboardConfig) setDashboardConfig(data.dashboardConfig);
+      }
+    });
+
+    // Cross-tab storage event listener
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_TRANSACTIONS && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setTransactions(parsed);
+        } catch {}
+      }
+      if (e.key === STORAGE_KEY_ITEMS && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setItems(parsed);
+        } catch {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      unsubscribeCrossTab();
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  // 2. Subscribe to real-time Firestore database updates across all devices
   useEffect(() => {
     const unsubscribe = subscribeToWarehouseData((data) => {
       if (data) {
@@ -311,7 +360,7 @@ export default function App() {
         if (data.items && Array.isArray(data.items)) setItems(data.items);
         if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
         if (data.employees && Array.isArray(data.employees)) setEmployees(data.employees);
-        if (data.users && Array.isArray(data.users)) setUsers(getMergedUsers(data.users));
+        if (data.users && Array.isArray(data.users)) setUsers(sanitizeUsersList(data.users));
         if (data.loans && Array.isArray(data.loans)) setLoans(data.loans);
         if (data.auditLogs && Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
         if (data.rolePermissions) setRolePermissions(data.rolePermissions);
@@ -487,16 +536,29 @@ export default function App() {
 
   const handleDeleteUser = (userId: string) => {
     const userToDel = users.find((u) => u.id === userId);
+    if (!userToDel) {
+      showToast('Akun pengguna tidak ditemukan atau sudah dihapus.', 'warning');
+      return;
+    }
+
+    if (userToDel.id === currentUser.id) {
+      showToast('Anda tidak dapat menghapus akun yang sedang Anda gunakan saat ini.', 'warning');
+      return;
+    }
+
     const nextUsers = users.filter((u) => u.id !== userId);
-    setUsers(nextUsers);
+    // Ensure safety: do not leave zero users
+    const safeUsers = nextUsers.length > 0 ? nextUsers : [INITIAL_USERS[0]];
+    
+    setUsers(safeUsers);
     try {
-      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(nextUsers));
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(safeUsers));
     } catch (e) {
       console.error('Save users error', e);
     }
-    syncToCloud({ users: nextUsers });
-    logAudit('Hapus Akun Pengguna', 'USERS', `Menghapus akun ${userToDel?.fullName || userId}`);
-    showToast(`Akun "${userToDel?.fullName || userId}" telah dihapus.`, 'warning');
+    syncToCloud({ users: safeUsers });
+    logAudit('Hapus Akun Pengguna', 'USERS', `Menghapus akun ${userToDel.fullName} (@${userToDel.username})`);
+    showToast(`Akun "${userToDel.fullName}" (@${userToDel.username}) berhasil dihapus secara permanen.`, 'success');
   };
 
   // Dashboard Settings operations
@@ -932,6 +994,22 @@ export default function App() {
   const activeLoansCount = loans.filter((l) => l.status === 'BORROWED' || l.status === 'OVERDUE').length;
   const pendingApprovalsCount = transactions.filter((t) => t.type === 'OUT' && t.status === 'PENDING').length;
 
+  // Render Public Self-Service Request Portal if opened via QR or direct link (No login required)
+  if (isPublicPortalOpen) {
+    return (
+      <PublicRequestPortalView
+        items={items}
+        employees={employees}
+        companyName={dashboardConfig.appName || 'GUDANG GA'}
+        companySubtitle={dashboardConfig.companySubtitle || 'General Affairs Inventory & Barcode Control System'}
+        logoUrl={dashboardConfig.logoUrl}
+        onSubmitTransaction={handleSubmitTransaction}
+        onGoToStaffLogin={() => setIsPublicPortalOpen(false)}
+        recentTransactions={transactions}
+      />
+    );
+  }
+
   // Render Login View if not logged in (Requirement 4)
   if (!isLoggedIn) {
     return (
@@ -946,6 +1024,7 @@ export default function App() {
           localStorage.setItem('ga_warehouse_is_logged_in', 'true');
           localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
         }}
+        onGoToRequestPortal={() => setIsPublicPortalOpen(true)}
       />
     );
   }
@@ -1056,6 +1135,17 @@ export default function App() {
                     {currentUser.role.replace('_', ' ')}
                   </div>
                 </div>
+              </button>
+
+              {/* Header Icon: Google Sheets Sync & Export */}
+              <button
+                type="button"
+                onClick={() => setIsGoogleSheetsModalOpen(true)}
+                title="Integrasi Google Sheets (Ekspor Laporan & Impor Stok)"
+                className="p-1.5 sm:p-2 text-slate-200 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/30 rounded-lg sm:rounded-xl border border-emerald-400/30 shadow-sm transition-all cursor-pointer flex items-center gap-1 sm:gap-1.5 text-xs font-semibold shrink-0"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
+                <span className="hidden xl:inline">Google Sheets</span>
               </button>
 
               {/* Header Icon: Personil Database */}
@@ -1217,6 +1307,20 @@ export default function App() {
           <div className="pt-2 mt-2 border-t border-slate-800 space-y-1">
             <button
               onClick={() => {
+                setIsGoogleSheetsModalOpen(true);
+                setMobileMenuOpen(false);
+              }}
+              className="w-full text-left px-3.5 py-2 text-xs font-bold rounded-xl flex items-center justify-between text-emerald-300 hover:bg-slate-800"
+            >
+              <span className="flex items-center gap-2.5">
+                <FileSpreadsheet className="w-4 h-4" /> Integrasi Google Sheets
+              </span>
+              <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-md font-mono">
+                API Live
+              </span>
+            </button>
+            <button
+              onClick={() => {
                 setIsEmployeeModalOpen(true);
                 setMobileMenuOpen(false);
               }}
@@ -1364,6 +1468,7 @@ export default function App() {
               setBarcodePrintMode('STOCK');
               setIsBarcodeSheetOpen(true);
             }}
+            onOpenGoogleSheets={() => setIsGoogleSheetsModalOpen(true)}
           />
         )}
 
@@ -1411,6 +1516,7 @@ export default function App() {
         items={items}
         transactions={transactions}
         companyLogo={dashboardConfig.logoUrl}
+        companyName={dashboardConfig.appName || 'GUDANG GA'}
         initialMode={barcodePrintMode}
       />
 
@@ -1431,6 +1537,8 @@ export default function App() {
         onUpdateEmployee={handleUpdateEmployee}
         onDeleteEmployee={handleDeleteEmployee}
         onResetEmployees={handleResetEmployees}
+        onOpenGoogleSheets={() => setIsGoogleSheetsModalOpen(true)}
+        companyName={dashboardConfig.appName || 'GUDANG GA'}
       />
 
       {/* 5. User Account & RBAC Management Modal */}
@@ -1502,6 +1610,25 @@ export default function App() {
         onClose={() => setIsStatsModalOpen(false)}
         items={items}
         transactions={transactions}
+      />
+
+      {/* 12. Google Sheets Cloud Integration Modal */}
+      <GoogleSheetsModal
+        isOpen={isGoogleSheetsModalOpen}
+        onClose={() => setIsGoogleSheetsModalOpen(false)}
+        items={items}
+        transactions={transactions}
+        loans={loans}
+        employees={employees}
+        companyName={dashboardConfig.appName || 'GUDANG GA'}
+        onImportItems={(newItems, mode) => {
+          handleBulkAddItems(newItems, mode);
+          setToastMessage({
+            text: `Berhasil mengimpor ${newItems.length} data barang dari Google Sheets!`,
+            type: 'success',
+          });
+        }}
+        showToast={(text, type) => setToastMessage({ text, type })}
       />
 
       {/* Footer */}

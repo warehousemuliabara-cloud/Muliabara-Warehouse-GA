@@ -1,16 +1,45 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
+  initializeFirestore,
   getFirestore, 
   doc, 
   setDoc, 
   getDoc,
-  onSnapshot
+  onSnapshot,
+  setLogLevel,
+  persistentLocalCache,
+  persistentMultipleTabManager
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Configure log level to suppress benign connection polling notices
+try {
+  setLogLevel('error');
+} catch {
+  // Ignore in case environment restricts logLevel
+}
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const dbId = (firebaseConfig as any).firestoreDatabaseId;
-export const db = dbId ? getFirestore(app, dbId) : getFirestore(app);
+
+// Initialize Firestore with auto-detect long polling and multi-tab persistent cache
+let firestoreInstance: ReturnType<typeof getFirestore>;
+try {
+  firestoreInstance = initializeFirestore(
+    app,
+    {
+      experimentalAutoDetectLongPolling: true,
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    },
+    dbId || undefined
+  );
+} catch {
+  firestoreInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
+}
+
+export const db = firestoreInstance;
 
 // Global Warehouse Collection & Document constants
 export const WAREHOUSE_DOC_ID = 'warehouse_kbct_main';
@@ -33,6 +62,32 @@ export type SyncState = 'connected' | 'syncing' | 'offline' | 'error';
 
 let currentSyncState: SyncState = 'connected';
 const syncListeners: ((state: SyncState, message?: string) => void)[] = [];
+
+// Cross-tab BroadcastChannel for instant 0ms multi-account & multi-tab synchronization
+const CROSS_TAB_CHANNEL_NAME = 'ga_warehouse_kbct_broadcast_v1';
+let broadcastChannel: BroadcastChannel | null = null;
+if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+  try {
+    broadcastChannel = new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+  } catch (e) {
+    console.warn('BroadcastChannel not supported:', e);
+  }
+}
+
+export function subscribeToCrossTabSync(callback: (payload: Partial<WarehouseSyncPayload>) => void) {
+  if (!broadcastChannel) return () => {};
+  
+  const handleMessage = (event: MessageEvent) => {
+    if (event.data && event.data.type === 'WAREHOUSE_SYNC_UPDATE' && event.data.payload) {
+      callback(event.data.payload);
+    }
+  };
+
+  broadcastChannel.addEventListener('message', handleMessage);
+  return () => {
+    broadcastChannel?.removeEventListener('message', handleMessage);
+  };
+}
 
 export function onSyncStatusChange(callback: (state: SyncState, message?: string) => void) {
   syncListeners.push(callback);
@@ -63,7 +118,12 @@ export async function fetchFreshWarehouseData(): Promise<WarehouseSyncPayload | 
     const snapshot = await getDoc(docRef);
     if (snapshot.exists()) {
       updateSyncState('connected', 'Tersinkronisasi Cloud');
-      return snapshot.data() as WarehouseSyncPayload;
+      const data = snapshot.data() as WarehouseSyncPayload;
+      // Broadcast to other tabs as well
+      if (broadcastChannel) {
+        broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload: data });
+      }
+      return data;
     }
     return null;
   } catch (err: any) {
@@ -86,7 +146,16 @@ export function subscribeToWarehouseData(
       (snapshot) => {
         if (snapshot.exists()) {
           updateSyncState('connected', 'Tersinkronisasi Cloud');
-          onData(snapshot.data() as WarehouseSyncPayload);
+          const data = snapshot.data() as WarehouseSyncPayload;
+          onData(data);
+          // Broadcast to any other open tabs in the same browser
+          if (broadcastChannel) {
+            try {
+              broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload: data });
+            } catch {
+              // safe
+            }
+          }
         } else {
           updateSyncState('connected', 'Tersinkronisasi Cloud');
         }
@@ -109,7 +178,7 @@ export function subscribeToWarehouseData(
 }
 
 /**
- * Push full updated warehouse snapshot to Firestore
+ * Push full updated warehouse snapshot to Firestore and broadcast immediately
  */
 export async function pushWarehouseSync(
   payload: Partial<WarehouseSyncPayload> & { updatedBy: string }
@@ -121,6 +190,17 @@ export async function pushWarehouseSync(
       ...payload,
       lastUpdated: new Date().toISOString(),
     };
+
+    // 1. Broadcast locally first for instant zero-latency UI update across tabs/accounts
+    if (broadcastChannel) {
+      try {
+        broadcastChannel.postMessage({ type: 'WAREHOUSE_SYNC_UPDATE', payload: dataToSave });
+      } catch {
+        // safe
+      }
+    }
+
+    // 2. Persist to Firestore Cloud
     await setDoc(docRef, dataToSave, { merge: true });
     updateSyncState('connected', 'Tersinkronisasi Cloud');
     return true;
@@ -135,3 +215,4 @@ export async function pushWarehouseSync(
     return false;
   }
 }
+

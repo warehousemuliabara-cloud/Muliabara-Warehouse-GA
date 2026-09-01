@@ -4,7 +4,9 @@ import {
   User, 
   Eye, 
   EyeOff, 
-  AlertCircle
+  AlertCircle,
+  QrCode,
+  Sparkles
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import { INITIAL_USERS } from '../data/initialData';
@@ -18,6 +20,7 @@ interface LoginViewProps {
   companySubtitle?: string;
   logoUrl?: string | null;
   onLoginSuccess: (user: UserAccount) => void;
+  onGoToRequestPortal?: () => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
@@ -27,20 +30,19 @@ export const LoginView: React.FC<LoginViewProps> = ({
   companySubtitle = 'General Affairs Inventory & Barcode Control System',
   logoUrl,
   onLoginSuccess,
+  onGoToRequestPortal,
 }) => {
-  // Retrieve saved accounts from props or localStorage to ensure custom accounts created in Manajemen Akun are always recognized
-  const getMergedUsers = (savedList: UserAccount[]): UserAccount[] => {
-    const map = new Map<string, UserAccount>();
-    INITIAL_USERS.forEach((u) => map.set(u.username.toLowerCase(), u));
-    if (Array.isArray(savedList)) {
-      savedList.forEach((u) => {
-        if (u && u.username) {
-          const existing = map.get(u.username.toLowerCase());
-          map.set(u.username.toLowerCase(), existing ? { ...existing, ...u } : u);
-        }
-      });
+  // Validate and clean user list while respecting user deletions
+  const sanitizeUsersList = (savedList: any): UserAccount[] => {
+    if (Array.isArray(savedList) && savedList.length > 0) {
+      const valid = savedList.filter(
+        (u) => u && typeof u === 'object' && u.id && u.username
+      );
+      if (valid.length > 0) {
+        return valid;
+      }
     }
-    return Array.from(map.values());
+    return INITIAL_USERS;
   };
 
   const [localAccountsList, setLocalAccountsList] = useState<UserAccount[]>(() => {
@@ -48,22 +50,20 @@ export const LoginView: React.FC<LoginViewProps> = ({
       const savedUsers = localStorage.getItem('ga_warehouse_users_v8') || localStorage.getItem('ga_warehouse_users_v7') || localStorage.getItem('ga_warehouse_users_v6');
       if (savedUsers) {
         const parsed = JSON.parse(savedUsers);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return getMergedUsers(parsed);
-        }
+        return sanitizeUsersList(parsed);
       }
     } catch {
       // ignore
     }
     const raw = users || userAccounts || [];
-    return raw.length > 0 ? getMergedUsers(raw) : INITIAL_USERS;
+    return raw.length > 0 ? sanitizeUsersList(raw) : INITIAL_USERS;
   });
 
   // Sync if props update
   useEffect(() => {
     const raw = users || userAccounts;
     if (raw && raw.length > 0) {
-      setLocalAccountsList(getMergedUsers(raw));
+      setLocalAccountsList(sanitizeUsersList(raw));
     }
   }, [users, userAccounts]);
 
@@ -71,10 +71,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
   useEffect(() => {
     const unsubscribe = subscribeToWarehouseData((data) => {
       if (data && data.users && Array.isArray(data.users) && data.users.length > 0) {
-        const merged = getMergedUsers(data.users);
-        setLocalAccountsList(merged);
+        const sanitized = sanitizeUsersList(data.users);
+        setLocalAccountsList(sanitized);
         try {
-          localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(merged));
+          localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(sanitized));
         } catch {
           // ignore
         }
@@ -152,12 +152,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
       try {
         const cloudData = await fetchFreshWarehouseData();
         if (cloudData && cloudData.users && Array.isArray(cloudData.users) && cloudData.users.length > 0) {
-          const freshMerged = getMergedUsers(cloudData.users);
-          setLocalAccountsList(freshMerged);
-          currentAccounts = freshMerged;
+          const freshSanitized = sanitizeUsersList(cloudData.users);
+          setLocalAccountsList(freshSanitized);
+          currentAccounts = freshSanitized;
           matchedUser = findMatchingUser(currentAccounts, cleanIdent);
           try {
-            localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(freshMerged));
+            localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(freshSanitized));
           } catch {
             // ignore
           }
@@ -320,8 +320,22 @@ export const LoginView: React.FC<LoginViewProps> = ({
           </button>
         </form>
 
+        {/* Option to Open Request Portal Directly */}
+        {onGoToRequestPortal && (
+          <div className="mt-4 pt-3 border-t border-slate-700/60">
+            <button
+              type="button"
+              onClick={onGoToRequestPortal}
+              className="w-full py-2 px-3 bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-200 hover:text-white border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs group"
+            >
+              <QrCode className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
+              <span>Portal Permintaan Barang (Bebas Login)</span>
+            </button>
+          </div>
+        )}
+
         {/* Footer */}
-        <div className="mt-5 pt-4 border-t border-slate-700/60 text-center">
+        <div className="mt-4 text-center">
           <p className="text-[11px] text-slate-400">
             Sistem Inventaris & Logistik Gudang General Affairs
           </p>
