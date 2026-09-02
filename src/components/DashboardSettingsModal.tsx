@@ -24,6 +24,7 @@ import {
 import { DashboardConfig, ThemeColor, FontFamily, DashboardDensity, ThemeMode, UserAccount } from '../types';
 import { DEFAULT_DASHBOARD_CONFIG } from '../data/initialData';
 import { CompanyLogo } from './CompanyLogo';
+import { compressAndOptimizeImage } from '../utils/imageCompressor';
 
 interface DashboardSettingsModalProps {
   isOpen: boolean;
@@ -126,18 +127,20 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
     { id: 'dark', title: 'Mode Gelap (Dark)', desc: 'Latar gelap modern, hemat daya baterai & ramah mata malam hari.', icon: Moon },
   ];
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        alert('Ukuran file maksimal 2MB.');
-        return;
+      try {
+        const result = await compressAndOptimizeImage(file, {
+          maxWidth: 400,
+          maxHeight: 400,
+          quality: 0.9,
+          outputFormat: 'image/png',
+        });
+        setLogoUrl(result.dataUrl);
+      } catch (err) {
+        console.error('Failed to compress logo:', err);
       }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setLogoUrl(event.target?.result as string);
-      };
-      reader.readAsDataURL(file);
     }
   };
 

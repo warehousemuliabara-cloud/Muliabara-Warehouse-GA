@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Package, 
   Search, 
@@ -22,6 +22,7 @@ import {
   Sparkles,
   Layers,
   Check,
+  ChevronDown,
   X
 } from 'lucide-react';
 import { Item, ItemLoan, Employee, UserAccount, LoanStatus, UserRole, UserPermissions } from '../types';
@@ -87,11 +88,19 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
 
   // Form State for New Loan
   const [selectedItemId, setSelectedItemId] = useState('');
+  const [itemSearchKeyword, setItemSearchKeyword] = useState('');
+  const [isItemDropdownOpen, setIsItemDropdownOpen] = useState(false);
+  const itemDropdownRef = useRef<HTMLDivElement>(null);
+
   const [quantity, setQuantity] = useState(1);
   const [borrowerName, setBorrowerName] = useState('');
   const [borrowerPosition, setBorrowerPosition] = useState('');
   const [borrowerDept, setBorrowerDept] = useState(DEPARTMENTS[0]);
   const [borrowerPhone, setBorrowerPhone] = useState('');
+  const [employeeSearchKeyword, setEmployeeSearchKeyword] = useState('');
+  const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false);
+  const employeeDropdownRef = useRef<HTMLDivElement>(null);
+
   const [loanDate, setLoanDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [expectedReturnDate, setExpectedReturnDate] = useState(() => {
     const d = new Date();
@@ -101,8 +110,46 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
   const [purpose, setPurpose] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Handle outside click to close dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (itemDropdownRef.current && !itemDropdownRef.current.contains(event.target as Node)) {
+        setIsItemDropdownOpen(false);
+      }
+      if (employeeDropdownRef.current && !employeeDropdownRef.current.contains(event.target as Node)) {
+        setIsEmployeeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const selectedItemObj = items.find((i) => i.id === selectedItemId);
   const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Filtered item list for Searchable Combobox
+  const filteredItemChoices = items.filter((it) => {
+    const term = itemSearchKeyword.toLowerCase().trim();
+    if (!term) return true;
+    return (
+      it.name.toLowerCase().includes(term) ||
+      it.code.toLowerCase().includes(term) ||
+      (it.category && it.category.toLowerCase().includes(term)) ||
+      (it.rackLocation && it.rackLocation.toLowerCase().includes(term))
+    );
+  });
+
+  // Filtered employee list for Searchable Combobox
+  const filteredEmployeeChoices = employees.filter((emp) => {
+    const term = employeeSearchKeyword.toLowerCase().trim();
+    if (!term) return true;
+    return (
+      emp.name.toLowerCase().includes(term) ||
+      (emp.position && emp.position.toLowerCase().includes(term)) ||
+      (emp.department && emp.department.toLowerCase().includes(term)) ||
+      (emp.phone && emp.phone.toLowerCase().includes(term))
+    );
+  });
 
   // Filtered Loans
   const filteredLoans = loans.filter((loan) => {
@@ -195,10 +242,12 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
     setIsAddModalOpen(false);
 
     setSelectedItemId('');
+    setItemSearchKeyword('');
     setQuantity(1);
     setBorrowerName('');
     setBorrowerPosition('');
     setBorrowerPhone('');
+    setEmployeeSearchKeyword('');
     setPurpose('');
   };
 
@@ -723,24 +772,119 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                 </div>
               )}
 
-              {/* Select Item */}
-              <div>
+              {/* Select Item (Searchable & Scrollable Dropdown) */}
+              <div className="relative" ref={itemDropdownRef}>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Pilih Barang / Alat GA yang Dipinjam <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  required
-                  value={selectedItemId}
-                  onChange={(e) => setSelectedItemId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#66BB6A] bg-white font-medium text-slate-800"
-                >
-                  <option value="">-- Pilih Barang dari Master Stok --</option>
-                  {items.map((it) => (
-                    <option key={it.id} value={it.id} disabled={it.currentStock <= 0}>
-                      {it.name} ({it.code}) — Stok: {it.currentStock} {it.unit} {it.currentStock <= 0 ? '(HABIS)' : ''}
-                    </option>
-                  ))}
-                </select>
+                
+                {/* Search Input Box */}
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Search className="w-3.5 h-3.5" />
+                  </div>
+                  <input
+                    type="text"
+                    value={itemSearchKeyword}
+                    onFocus={() => setIsItemDropdownOpen(true)}
+                    onChange={(e) => {
+                      setItemSearchKeyword(e.target.value);
+                      setIsItemDropdownOpen(true);
+                    }}
+                    placeholder={selectedItemObj ? `${selectedItemObj.name} (${selectedItemObj.code})` : '-- Ketik nama / kode barang untuk mencari --'}
+                    className={`w-full pl-9 pr-8 py-2 text-xs border rounded-xl focus:ring-2 focus:ring-[#66BB6A] bg-white font-medium text-slate-800 ${
+                      selectedItemObj ? 'border-[#66BB6A] bg-emerald-50/30 font-bold' : 'border-slate-300'
+                    }`}
+                  />
+                  {itemSearchKeyword ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemSearchKeyword('');
+                        setSelectedItemId('');
+                      }}
+                      className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsItemDropdownOpen(!isItemDropdownOpen)}
+                      className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Selected Item Summary Chip */}
+                {selectedItemObj && (
+                  <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between text-xs text-emerald-800">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300 text-[10px]">
+                        {selectedItemObj.code}
+                      </span>
+                      <span className="font-bold">{selectedItemObj.name}</span>
+                    </div>
+                    <span className="text-[11px] font-bold">
+                      Stok Tersedia: <span className="text-emerald-700 font-extrabold">{selectedItemObj.currentStock} {selectedItemObj.unit}</span>
+                    </span>
+                  </div>
+                )}
+
+                {/* Dropdown Menu (Scrollable List) */}
+                {isItemDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-slate-300 rounded-xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100">
+                    {filteredItemChoices.length === 0 ? (
+                      <div className="p-3 text-center text-xs text-slate-500 font-medium">
+                        Tidak ada barang yang cocok dengan kata kunci "{itemSearchKeyword}".
+                      </div>
+                    ) : (
+                      filteredItemChoices.map((it) => {
+                        const isSelected = it.id === selectedItemId;
+                        const isOutOfStock = it.currentStock <= 0;
+                        return (
+                          <button
+                            key={it.id}
+                            type="button"
+                            disabled={isOutOfStock}
+                            onClick={() => {
+                              setSelectedItemId(it.id);
+                              setItemSearchKeyword(`${it.name} (${it.code})`);
+                              setIsItemDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                              isOutOfStock 
+                                ? 'bg-slate-50 opacity-50 cursor-not-allowed' 
+                                : isSelected 
+                                  ? 'bg-[#E8F5E9] text-[#1B5E20] font-bold' 
+                                  : 'hover:bg-slate-100 text-slate-800'
+                            }`}
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-slate-900">{it.name}</span>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="font-mono text-[10px] text-slate-500">{it.code}</span>
+                                <span className="text-[10px] text-slate-400">•</span>
+                                <span className="text-[10px] text-slate-500">{it.category}</span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                                isOutOfStock 
+                                  ? 'bg-rose-100 text-rose-700' 
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}>
+                                {isOutOfStock ? 'Habis (0)' : `Stok: ${it.currentStock} ${it.unit}`}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Quantity */}
@@ -767,25 +911,89 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                 </div>
               </div>
 
-              {/* Quick Pick Employee */}
+              {/* Quick Pick Employee & Borrower Information (Searchable & Scrollable) */}
               <div className="p-3.5 bg-[#E8F5E9]/50 rounded-xl border border-[#A5D6A7] space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold uppercase text-[#1B5E20]">Data Peminjam</span>
-                  <span className="text-[10px] text-slate-500 font-medium">Pilih cepat dari {employees.length} personil</span>
+                  <span className="text-[10px] text-slate-500 font-medium">Cari dari {employees.length} data personil</span>
                 </div>
 
-                <div>
-                  <select
-                    onChange={(e) => handleSelectEmployee(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium"
-                  >
-                    <option value="">-- Cari Nama Karyawan --</option>
-                    {employees.map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.name} — {e.position} ({e.department || 'Kantor'})
-                      </option>
-                    ))}
-                  </select>
+                {/* Searchable Combobox for Employee */}
+                <div className="relative" ref={employeeDropdownRef}>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                      <Search className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      type="text"
+                      value={employeeSearchKeyword}
+                      onFocus={() => setIsEmployeeDropdownOpen(true)}
+                      onChange={(e) => {
+                        setEmployeeSearchKeyword(e.target.value);
+                        setBorrowerName(e.target.value);
+                        setIsEmployeeDropdownOpen(true);
+                      }}
+                      placeholder="-- Ketik nama peminjam / pilih karyawan --"
+                      className="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium text-slate-800 focus:ring-2 focus:ring-[#66BB6A]"
+                    />
+                    {employeeSearchKeyword ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmployeeSearchKeyword('');
+                          setBorrowerName('');
+                        }}
+                        className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsEmployeeDropdownOpen(!isEmployeeDropdownOpen)}
+                        className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Employee Dropdown List */}
+                  {isEmployeeDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-slate-300 rounded-xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
+                      {filteredEmployeeChoices.length === 0 ? (
+                        <div className="p-3 text-center text-xs text-slate-500">
+                          <span>Tidak ditemukan karyawan. Anda dapat mengetik nama manual di bawah.</span>
+                        </div>
+                      ) : (
+                        filteredEmployeeChoices.map((e) => (
+                          <button
+                            key={e.id}
+                            type="button"
+                            onClick={() => {
+                              setBorrowerName(e.name);
+                              setBorrowerPosition(e.position || '');
+                              if (e.department) setBorrowerDept(e.department);
+                              if (e.phone) setBorrowerPhone(e.phone);
+                              setEmployeeSearchKeyword(`${e.name} — ${e.position || 'Staf'} (${e.department || 'Kantor'})`);
+                              setIsEmployeeDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-[#E8F5E9] hover:text-[#1B5E20] transition-colors flex items-center justify-between"
+                          >
+                            <div>
+                              <div className="font-bold text-slate-900">{e.name}</div>
+                              <div className="text-[10px] text-slate-500">
+                                {e.position || 'Staf'} • {e.department || 'Kantor'}
+                              </div>
+                            </div>
+                            {e.phone && (
+                              <span className="text-[10px] font-mono text-slate-400">{e.phone}</span>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -795,7 +1003,10 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                       type="text"
                       required
                       value={borrowerName}
-                      onChange={(e) => setBorrowerName(e.target.value)}
+                      onChange={(e) => {
+                        setBorrowerName(e.target.value);
+                        setEmployeeSearchKeyword(e.target.value);
+                      }}
                       placeholder="Nama Peminjam"
                       className="w-full px-3 py-1.5 text-xs font-bold uppercase border border-slate-300 rounded-lg bg-white"
                     />
@@ -838,20 +1049,24 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                 </div>
               </div>
 
-              {/* Dates */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Dates - Sejajar (Aligned horizontally) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tanggal Pinjam</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Tanggal Pinjam <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="date"
                     required
                     value={loanDate}
                     onChange={(e) => setLoanDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white font-medium"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Estimasi Tanggal Kembali</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Estimasi Tanggal Kembali <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="date"
                     required

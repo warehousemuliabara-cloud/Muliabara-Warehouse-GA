@@ -183,6 +183,79 @@ export function detectCategoryFromName(name: string): string {
     return 'Logistik & Pengemasan';
   }
 
+  // Alat & Perlengkapan Olahraga
+  if (
+    lower.includes('bola') ||
+    lower.includes('raket') ||
+    lower.includes('badminton') ||
+    lower.includes('futsal') ||
+    lower.includes('sepak bola') ||
+    lower.includes('pingpong') ||
+    lower.includes('tenis') ||
+    lower.includes('matras') ||
+    lower.includes('peluit') ||
+    lower.includes('jersey') ||
+    lower.includes('olahraga') ||
+    lower.includes('sport') ||
+    lower.includes('gawang') ||
+    lower.includes('ring basket') ||
+    lower.includes('voli') ||
+    lower.includes('volly')
+  ) {
+    return 'Alat & Perlengkapan Olahraga';
+  }
+
+  // Alat & Kelengkapan Elektrik
+  if (
+    lower.includes('mcb') ||
+    lower.includes('saklar') ||
+    lower.includes('steker') ||
+    lower.includes('fitting') ||
+    lower.includes('trafo') ||
+    lower.includes('kontaktor') ||
+    lower.includes('panel listrik') ||
+    lower.includes('genset') ||
+    lower.includes('isolasi listrik') ||
+    lower.includes('multitester') ||
+    lower.includes('tang ampere') ||
+    lower.includes('sekring') ||
+    lower.includes('fuse') ||
+    lower.includes('electric') ||
+    lower.includes('elektrik') ||
+    lower.includes('terminal listrik') ||
+    lower.includes('kabel listrik') ||
+    lower.includes('stop kontak listrik')
+  ) {
+    return 'Alat & Kelengkapan Elektrik';
+  }
+
+  // Material Bangunan
+  if (
+    lower.includes('semen') ||
+    lower.includes('pasir') ||
+    lower.includes('bata') ||
+    lower.includes('hebel') ||
+    lower.includes('keramik') ||
+    lower.includes('cat tembok') ||
+    lower.includes('cat dinding') ||
+    lower.includes('kuas rol') ||
+    lower.includes('tinner') ||
+    lower.includes('thinner') ||
+    lower.includes('plamir') ||
+    lower.includes('talang') ||
+    lower.includes('seng') ||
+    lower.includes('atap') ||
+    lower.includes('besi beton') ||
+    lower.includes('kawat bendrat') ||
+    lower.includes('baut roofing') ||
+    lower.includes('genteng') ||
+    lower.includes('silikon kaca') ||
+    lower.includes('sealant') ||
+    lower.includes('bangunan')
+  ) {
+    return 'Material Bangunan';
+  }
+
   // Maintenance & Perkakas
   if (
     lower.includes('obeng') ||
@@ -244,6 +317,12 @@ export function generateCategorySKU(
     prefix = 'GA-LOG-';
   } else if (cat.includes('Aset') || cat.includes('Peralatan')) {
     prefix = 'GA-AST-';
+  } else if (cat.includes('Olahraga') || cat.includes('Olah Raga')) {
+    prefix = 'GA-OLR-';
+  } else if (cat.includes('Elektrik') || cat.includes('Electric')) {
+    prefix = 'GA-ELC-';
+  } else if (cat.includes('Bangunan')) {
+    prefix = 'GA-BGN-';
   }
 
   // Find all existing items matching this prefix

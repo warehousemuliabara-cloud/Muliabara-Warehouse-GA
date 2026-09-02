@@ -223,8 +223,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
         
         {/* Brand Header */}
         <div className="flex flex-col items-center justify-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/25 ring-1 ring-white/20 mb-3 shrink-0">
-            <Lock className="w-6 h-6 text-white" />
+          <div className="mb-3 flex items-center justify-center">
+            <CompanyLogo
+              logoUrl={logoUrl}
+              companyName={appName}
+              className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shadow-lg ring-1 ring-white/20 object-contain bg-slate-900/60 p-1.5"
+            />
           </div>
           
           <div className="flex items-center justify-center gap-2">

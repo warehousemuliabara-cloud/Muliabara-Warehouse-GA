@@ -94,14 +94,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     lowStockAlert: true,
   };
 
-  // Chart Period Filter ('THIS_MONTH' | 'LAST_30' | 'ALL' | 'CUSTOM')
-  const [chartPeriod, setChartPeriod] = useState<'THIS_MONTH' | 'LAST_30' | 'ALL' | 'CUSTOM'>('THIS_MONTH');
+  // Chart Period Filter ('THIS_MONTH' | 'CUSTOM')
+  const [chartPeriod, setChartPeriod] = useState<'THIS_MONTH' | 'CUSTOM'>('THIS_MONTH');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 14);
-    return d.toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   });
-  const [customEndDate, setCustomEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [customEndDate, setCustomEndDate] = useState<string>(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
 
   // State for Barcode Print Dropdown menu in Dashboard Header
   const [isPrintDropdownOpen, setIsPrintDropdownOpen] = useState(false);
@@ -124,25 +133,45 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Helper function to extract local date key YYYY-MM-DD from Date
+  const formatLocalDateKey = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper function to extract YYYY-MM-DD from transaction timestamp or date
+  const getTransactionDateKey = (t: Transaction): string => {
+    const str = t.timestamp || t.date || '';
+    if (!str) return '';
+    const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      return formatLocalDateKey(parsed);
+    }
+    return '';
+  };
+
   // -------------------------------------------------------------
   // Data for Operation Overview Area Chart (Dual Spline Waves)
   // Synchronized with real IN & OUT transaction histories
   // -------------------------------------------------------------
   const operationTimeSeriesData = useMemo(() => {
     const dailyMap: Record<string, { dateLabel: string; inQty: number; outQty: number; rawDate: string }> = {};
-
-    // 1. Determine timeline window based on filter or available transactions
     const now = new Date();
     
     if (chartPeriod === 'THIS_MONTH') {
       const year = now.getFullYear();
       const month = now.getMonth();
-      const firstDay = new Date(year, month, 1);
       const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
       
       for (let day = 1; day <= totalDaysInMonth; day++) {
         const d = new Date(year, month, day);
-        const isoKey = d.toISOString().split('T')[0];
+        const isoKey = formatLocalDateKey(d);
         const dateLabel = `${day} ${d.toLocaleDateString('id-ID', { month: 'short' })}`;
         dailyMap[isoKey] = {
           dateLabel,
@@ -152,14 +181,31 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         };
       }
     } else if (chartPeriod === 'CUSTOM') {
-      const start = new Date(customStartDate);
-      const end = new Date(customEndDate);
+      const start = new Date(customStartDate + 'T00:00:00');
+      const end = new Date(customEndDate + 'T23:59:59');
       if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
-        const daysDiff = Math.min(120, Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1));
-        for (let i = 0; i < daysDiff; i++) {
-          const d = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
-          const isoKey = d.toISOString().split('T')[0];
-          const dateLabel = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+        const cur = new Date(start);
+        let count = 0;
+        while (cur <= end && count < 365) {
+          count++;
+          const isoKey = formatLocalDateKey(cur);
+          const dateLabel = `${cur.getDate()} ${cur.toLocaleDateString('id-ID', { month: 'short' })}`;
+          dailyMap[isoKey] = {
+            dateLabel,
+            inQty: 0,
+            outQty: 0,
+            rawDate: isoKey,
+          };
+          cur.setDate(cur.getDate() + 1);
+        }
+      } else {
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+        for (let day = 1; day <= totalDaysInMonth; day++) {
+          const d = new Date(year, month, day);
+          const isoKey = formatLocalDateKey(d);
+          const dateLabel = `${day} ${d.toLocaleDateString('id-ID', { month: 'short' })}`;
           dailyMap[isoKey] = {
             dateLabel,
             inQty: 0,
@@ -168,85 +214,26 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           };
         }
       }
-    } else if (chartPeriod === 'ALL') {
-      // Find range across all transactions
-      const validDates: Date[] = [];
-      (transactions || []).forEach((t) => {
-        const rawDateStr = (t.timestamp ? (t.timestamp.split(' ')[0] || t.timestamp.split('T')[0]) : t.date) || '';
-        if (rawDateStr) {
-          const d = new Date(rawDateStr);
-          if (!isNaN(d.getTime())) validDates.push(d);
-        }
-      });
-
-      let startDate = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
-      if (validDates.length > 0) {
-        const earliest = new Date(Math.min(...validDates.map(d => d.getTime())));
-        if (earliest < startDate) {
-          startDate = earliest;
-        }
-      }
-
-      const daysDiff = Math.min(60, Math.max(14, Math.ceil((now.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000)) + 1));
-      for (let i = daysDiff - 1; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const isoKey = d.toISOString().split('T')[0];
-        const dateLabel = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-        dailyMap[isoKey] = {
-          dateLabel,
-          inQty: 0,
-          outQty: 0,
-          rawDate: isoKey,
-        };
-      }
-    } else {
-      const daysToGenerate = 30;
-      for (let i = daysToGenerate - 1; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const isoKey = d.toISOString().split('T')[0];
-        const dateLabel = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-        dailyMap[isoKey] = {
-          dateLabel,
-          inQty: 0,
-          outQty: 0,
-          rawDate: isoKey,
-        };
-      }
     }
 
-    // 2. Populate actual transaction volumes from transactions history
+    // Populate actual transaction volumes from transactions history
     (transactions || []).forEach((t) => {
-      // Exclude rejected requests from real operational volume
       if (t.status === 'REJECTED') return;
-
-      const rawDateStr = (t.timestamp ? (t.timestamp.split(' ')[0] || t.timestamp.split('T')[0]) : t.date) || '';
-      if (!rawDateStr) return;
+      const txDateStr = getTransactionDateKey(t);
+      if (!txDateStr) return;
 
       const qtySum = (t.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
 
-      // If within our mapped timeline
-      if (dailyMap[rawDateStr]) {
+      if (dailyMap[txDateStr]) {
         if (t.type === 'IN') {
-          dailyMap[rawDateStr].inQty += qtySum;
+          dailyMap[txDateStr].inQty += qtySum;
         } else if (t.type === 'OUT') {
-          dailyMap[rawDateStr].outQty += qtySum;
-        }
-      } else if (chartPeriod === 'ALL') {
-        // In case transaction is outside current pre-generated dates in ALL mode
-        const d = new Date(rawDateStr);
-        if (!isNaN(d.getTime())) {
-          dailyMap[rawDateStr] = {
-            dateLabel: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-            inQty: t.type === 'IN' ? qtySum : 0,
-            outQty: t.type === 'OUT' ? qtySum : 0,
-            rawDate: rawDateStr,
-          };
+          dailyMap[txDateStr].outQty += qtySum;
         }
       }
     });
 
-    const dataArray = Object.values(dailyMap).sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
-    return dataArray;
+    return Object.values(dailyMap).sort((a, b) => a.rawDate.localeCompare(b.rawDate));
   }, [transactions, chartPeriod, customStartDate, customEndDate]);
 
   // -------------------------------------------------------------
@@ -325,23 +312,23 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   // -------------------------------------------------------------
   // Data for SKU Demand Velocity Sparkline
-  // Synchronized with 6-week outbound consumption velocity
+  // Synchronized with 1-month (4-week) outbound consumption velocity
   // -------------------------------------------------------------
   const skuSparklineData = useMemo(() => {
     const now = new Date();
-    // 6 weekly buckets (W1 to W6)
+    // 4 weekly buckets for 1 running month (Mgg 1 - Mgg 4)
     const weeks: { name: string; val: number; dateRange: string }[] = [];
 
-    for (let w = 5; w >= 0; w--) {
+    for (let w = 3; w >= 0; w--) {
       const weekStart = new Date(now.getTime() - (w * 7 + 7) * 24 * 60 * 60 * 1000);
       const weekEnd = new Date(now.getTime() - (w * 7) * 24 * 60 * 60 * 1000);
       
       let weekOutflowQty = 0;
       outTransactions.forEach((t) => {
         if (t.status === 'REJECTED') return;
-        const dateStr = (t.timestamp ? (t.timestamp.split(' ')[0] || t.timestamp.split('T')[0]) : t.date) || '';
-        if (!dateStr) return;
-        const tDate = new Date(dateStr);
+        const txDateStr = getTransactionDateKey(t);
+        if (!txDateStr) return;
+        const tDate = new Date(txDateStr + 'T12:00:00');
         if (tDate >= weekStart && tDate <= weekEnd) {
           weekOutflowQty += (t.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
         }
@@ -358,11 +345,19 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return weeks;
   }, [outTransactions]);
 
-  // Top fast-moving SKU velocity metric
+  // Top fast-moving SKU velocity metric in 1 running month
   const topDemandSKU = useMemo(() => {
+    const now = new Date();
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const itemDemandMap: Record<string, { code: string; name: string; qty: number }> = {};
+
     outTransactions.forEach((t) => {
       if (t.status === 'REJECTED') return;
+      const txDateStr = getTransactionDateKey(t);
+      if (txDateStr) {
+        const tDate = new Date(txDateStr + 'T12:00:00');
+        if (tDate < oneMonthAgo) return;
+      }
       (t.items || []).forEach((it) => {
         if (!itemDemandMap[it.itemId]) {
           itemDemandMap[it.itemId] = { code: it.itemCode, name: it.itemName, qty: 0 };
@@ -739,8 +734,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             <div className="flex items-center flex-wrap gap-1 bg-slate-50 p-0.5 sm:p-1 rounded-xl border border-slate-200/80 text-[11px] sm:text-xs font-semibold">
               <button
                 type="button"
+                id="btn-period-this-month"
                 onClick={() => setChartPeriod('THIS_MONTH')}
-                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
+                className={`px-2.5 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
                   chartPeriod === 'THIS_MONTH'
                     ? 'bg-white text-blue-600 shadow-xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -750,30 +746,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setChartPeriod('LAST_30')}
-                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
-                  chartPeriod === 'LAST_30'
-                    ? 'bg-white text-blue-600 shadow-xs font-bold'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                30 hari
-              </button>
-              <button
-                type="button"
-                onClick={() => setChartPeriod('ALL')}
-                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs ${
-                  chartPeriod === 'ALL'
-                    ? 'bg-white text-blue-600 shadow-xs font-bold'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                semua
-              </button>
-              <button
-                type="button"
+                id="btn-period-custom"
                 onClick={() => setChartPeriod('CUSTOM')}
-                className={`px-2 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs flex items-center gap-1 ${
+                className={`px-2.5 py-0.5 sm:py-1 rounded-lg transition-all cursor-pointer text-[10.5px] sm:text-xs flex items-center gap-1 ${
                   chartPeriod === 'CUSTOM'
                     ? 'bg-white text-blue-600 shadow-xs font-bold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -1044,7 +1019,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 )}
               </div>
               <span className="text-[10px] font-bold text-purple-600 font-mono bg-purple-50 px-1.5 py-0.5 rounded">
-                6 Pekan
+                1 Bulan Berjalan
               </span>
             </div>
             <div className="h-12 w-full">
@@ -1073,7 +1048,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. COMPACT & NARROW LOW STOCK ALERT (3 ROWS MAXIMUM)                      */}
+      {/* 4. LOW STOCK ALERT (5 ROWS VISIBLE WITH SCROLL)                           */}
       {/* ========================================================================= */}
       <div className="max-w-2xl bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
         {/* Compact Header */}
@@ -1099,15 +1074,15 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
-        {/* 3 Compact Rows of Low Stock Items */}
-        <div className="p-2 divide-y divide-slate-100">
+        {/* 5 Rows with vertical scroll */}
+        <div className="max-h-[235px] overflow-y-auto p-2 divide-y divide-slate-100 custom-scrollbar">
           {lowStockItems.length === 0 ? (
             <div className="py-3 text-center text-slate-600 flex items-center justify-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-500" />
               <span className="text-xs font-semibold text-slate-700">Semua stok aman (di atas batas minimum)</span>
             </div>
           ) : (
-            (lowStockItems || []).slice(0, 3).map((item) => (
+            (lowStockItems || []).map((item) => (
               <div key={item.id} className="py-1.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50 rounded">
                 <div className="min-w-0 flex-1 truncate pr-2">
                   <div className="flex items-center gap-1.5 truncate">

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Building2, Layers } from 'lucide-react';
 
 interface CompanyLogoProps {
@@ -14,6 +14,12 @@ export const CompanyLogo: React.FC<CompanyLogoProps> = ({
   size = 'md',
   companyName = 'GUDANG GA',
 }) => {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [logoUrl]);
+
   const sizeClasses = {
     sm: 'w-8 h-8 text-xs',
     md: 'w-10 h-10 text-sm',
@@ -21,19 +27,18 @@ export const CompanyLogo: React.FC<CompanyLogoProps> = ({
     xl: 'w-20 h-20 text-xl',
   };
 
-  if (logoUrl) {
+  if (logoUrl && !hasError) {
     return (
       <div
-        className={`relative inline-flex items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm border border-slate-200/80 shrink-0 ${sizeClasses[size]} ${className}`}
+        className={`relative inline-flex items-center justify-center overflow-hidden rounded-xl bg-white shadow-xs border border-slate-200/80 shrink-0 ${sizeClasses[size]} ${className}`}
       >
         <img
           src={logoUrl}
           alt={companyName}
           referrerPolicy="no-referrer"
           className="w-full h-full object-contain p-1"
-          onError={(e) => {
-            // Fallback if image fails to load
-            (e.target as HTMLElement).style.display = 'none';
+          onError={() => {
+            setHasError(true);
           }}
         />
       </div>
@@ -43,7 +48,7 @@ export const CompanyLogo: React.FC<CompanyLogoProps> = ({
   // Default stylized GA emblem logo
   return (
     <div
-      className={`relative inline-flex items-center justify-center rounded-xl bg-[#b8d24d] text-slate-900 font-black shadow-md shrink-0 border border-lime-400/40 ${sizeClasses[size]} ${className}`}
+      className={`relative inline-flex items-center justify-center rounded-xl bg-[#b8d24d] text-slate-900 font-black shadow-xs shrink-0 border border-lime-400/40 ${sizeClasses[size]} ${className}`}
     >
       <div className="flex items-center justify-center tracking-tighter font-extrabold select-none">
         <span className="text-slate-900">GA</span>

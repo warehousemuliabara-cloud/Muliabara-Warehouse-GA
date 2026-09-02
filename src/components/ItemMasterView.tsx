@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Package, 
   Search, 
@@ -121,14 +121,30 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
   const [formMinStock, setFormMinStock] = useState<number | string>('5');
   const [formRackLocation, setFormRackLocation] = useState<string>('Gudang GA');
   const [formDescription, setFormDescription] = useState('');
+  const [isNameDropdownOpen, setIsNameDropdownOpen] = useState(false);
+  const nameDropdownRef = useRef<HTMLDivElement>(null);
 
   // Master list of known items
-  const availableDatabaseItems = React.useMemo(() => {
+  const availableDatabaseItems = useMemo(() => {
     const map = new Map<string, Item>();
     INITIAL_ITEMS.forEach((it) => map.set(it.name.toLowerCase().trim(), it));
     items.forEach((it) => map.set(it.name.toLowerCase().trim(), it));
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [items]);
+
+  // Filtered list based on typed name
+  const filteredDatabaseItems = useMemo(() => {
+    if (!formName.trim()) {
+      return availableDatabaseItems;
+    }
+    const q = formName.toLowerCase().trim();
+    return availableDatabaseItems.filter(
+      (it) =>
+        it.name.toLowerCase().includes(q) ||
+        it.code.toLowerCase().includes(q) ||
+        it.category.toLowerCase().includes(q)
+    );
+  }, [availableDatabaseItems, formName]);
 
   // Google Sheets integration state
   const [connectedConfig, setConnectedConfig] = useState<ConnectedSpreadsheetConfig | null>(null);
@@ -137,6 +153,16 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
 
   useEffect(() => {
     setConnectedConfig(getConnectedSpreadsheetConfig());
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (nameDropdownRef.current && !nameDropdownRef.current.contains(event.target as Node)) {
+        setIsNameDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const handleQuickSyncStock = async () => {
@@ -266,6 +292,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
     setFormMinStock('5');
     setFormRackLocation('Gudang GA');
     setFormDescription('');
+    setIsNameDropdownOpen(false);
     setIsModalOpen(true);
   };
 
@@ -283,6 +310,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
       : 'Gudang GA';
     setFormRackLocation(loc);
     setFormDescription(item.description || '');
+    setIsNameDropdownOpen(false);
     setIsModalOpen(true);
   };
 
@@ -862,52 +890,124 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                   Nama Lengkap Barang <span className="text-rose-500">*</span>
                 </label>
 
-                {!editingItem ? (
-                  <div className="space-y-2">
-                    <select
-                      required={selectedCatalogItem !== '__CUSTOM__'}
-                      value={selectedCatalogItem}
-                      onChange={(e) => handleSelectDatabaseItem(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] font-semibold text-slate-800 cursor-pointer"
-                    >
-                      <option value="">-- Klik untuk Pilih Barang dari Database ({availableDatabaseItems.length} Barang) --</option>
-                      {CATEGORIES.map((cat) => {
-                        const catItems = availableDatabaseItems.filter((it) => it.category === cat);
-                        if (catItems.length === 0) return null;
-                        return (
-                          <optgroup key={cat} label={`📂 ${cat} (${catItems.length} item)`}>
-                            {catItems.map((it) => (
-                              <option key={it.id || it.code} value={it.id || it.code}>
-                                {it.name} [{it.code}] ({it.unit})
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      })}
-                      <option value="__CUSTOM__">➕ Ketik Nama Barang Baru Lainnya (Kustom)...</option>
-                    </select>
-
-                    {selectedCatalogItem === '__CUSTOM__' && (
-                      <input
-                        type="text"
-                        required
-                        value={formName}
-                        onChange={(e) => handleCustomNameInput(e.target.value)}
-                        placeholder="Ketik nama lengkap barang baru (contoh: Kertas F4 75gr, Papan Kayu Meranti)..."
-                        className="w-full px-3 py-2 text-xs bg-white border border-[#66BB6A] rounded-lg focus:ring-2 focus:ring-[#66BB6A] font-semibold text-slate-900"
-                        autoFocus
-                      />
-                    )}
+                <div className="relative" ref={nameDropdownRef}>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      required
+                      id="input-form-item-name"
+                      value={formName}
+                      onFocus={() => setIsNameDropdownOpen(true)}
+                      onChange={(e) => {
+                        handleCustomNameInput(e.target.value);
+                        setIsNameDropdownOpen(true);
+                      }}
+                      placeholder="Ketik nama barang (contoh: Kertas A4, Spidol) atau pilih dari database..."
+                      className="w-full pl-3 pr-16 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] focus:border-[#66BB6A] font-semibold text-slate-900 shadow-2xs"
+                      autoComplete="off"
+                    />
+                    <div className="absolute right-1.5 flex items-center gap-1">
+                      {formName && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormName('');
+                            setIsNameDropdownOpen(true);
+                          }}
+                          className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                          title="Hapus ketikan"
+                        >
+                          ✕
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsNameDropdownOpen((prev) => !prev)}
+                        className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+                        title="Buka daftar pilihan barang database"
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <input
-                    type="text"
-                    required
-                    value={formName}
-                    onChange={(e) => handleCustomNameInput(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-[#66BB6A] font-semibold"
-                  />
-                )}
+
+                  {/* Searchable Combobox Dropdown */}
+                  {isNameDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-100 animate-in fade-in zoom-in-95 duration-150 max-h-64 overflow-y-auto custom-scrollbar">
+                      {/* 1. Opsi Manual: + Ketik Nama Barang Baru (Ketik Manual) */}
+                      <div className="p-1.5 bg-emerald-50/90 sticky top-0 z-10 border-b border-emerald-100">
+                        <button
+                          type="button"
+                          id="btn-select-custom-item-name"
+                          onClick={() => {
+                            if (formName.trim()) {
+                              handleCustomNameInput(formName);
+                            }
+                            setIsNameDropdownOpen(false);
+                          }}
+                          className="w-full px-2.5 py-2 text-left bg-white hover:bg-emerald-600 hover:text-white text-emerald-800 rounded-lg flex items-center justify-between font-bold text-xs border border-emerald-300 shadow-2xs cursor-pointer transition-colors group"
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <PlusCircle className="w-4 h-4 text-emerald-600 group-hover:text-white shrink-0" />
+                            <span className="truncate">
+                              {formName.trim()
+                                ? `+ Ketik Nama Barang Baru: "${formName}" (Ketik Manual)`
+                                : `+ Ketik Nama Barang Baru (Ketik Manual)`}
+                            </span>
+                          </div>
+                          <span className="text-[10px] bg-emerald-100 group-hover:bg-emerald-700 group-hover:text-white text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold shrink-0 ml-2">
+                            Manual
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* 2. Daftar Barang Database Terfilter */}
+                      <div className="p-1 space-y-0.5">
+                        <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Pilih dari Database ({filteredDatabaseItems.length} Barang)
+                        </div>
+                        {filteredDatabaseItems.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-slate-500">
+                            <p>Tidak ada barang database yang cocok.</p>
+                            <p className="text-[11px] text-emerald-600 font-semibold mt-0.5">
+                              Klik opsi "+ Ketik Nama Barang Baru" di atas untuk simpan manual.
+                            </p>
+                          </div>
+                        ) : (
+                          filteredDatabaseItems.map((it) => (
+                            <button
+                              key={it.id || it.code}
+                              type="button"
+                              onClick={() => {
+                                handleSelectDatabaseItem(it.id || it.code);
+                                setIsNameDropdownOpen(false);
+                              }}
+                              className="w-full px-2.5 py-1.5 text-left rounded-lg hover:bg-slate-100 flex items-center justify-between text-xs cursor-pointer transition-colors group"
+                            >
+                              <div className="min-w-0 flex-1 truncate pr-2">
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <p className="font-bold text-slate-800 group-hover:text-emerald-700 truncate">{it.name}</p>
+                                  <span className="text-[10px] font-mono text-slate-400 shrink-0">[{it.code}]</span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 truncate">
+                                  {it.category} • Rak: {it.rackLocation || '-'}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">
+                                  {it.unit}
+                                </span>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Ketik manual nama barang baru atau pilih dari daftar database katalog.
+                </p>
               </div>
 
               {/* Editable Kategori GA & Lokasi Gudang */}

@@ -63,7 +63,10 @@ export type Category =
   | 'Maintenance & Perkakas'
   | 'Logistik & Pengemasan'
   | 'Peralatan & Aset Kantor'
-  | 'Mess Manager & Resident';
+  | 'Mess Manager & Resident'
+  | 'Alat & Perlengkapan Olahraga'
+  | 'Alat & Kelengkapan Elektrik'
+  | 'Material Bangunan';
 
 export type Department =
   | 'BARGE & LOGISTIC'

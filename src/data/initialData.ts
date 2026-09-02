@@ -418,6 +418,9 @@ export const CATEGORIES = [
   'Elektronik & Komputer',
   'Maintenance & Perkakas',
   'Mess Manager & Resident',
+  'Alat & Perlengkapan Olahraga',
+  'Alat & Kelengkapan Elektrik',
+  'Material Bangunan',
 ];
 
 export const UNITS = [
