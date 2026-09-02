@@ -231,7 +231,33 @@ export default function App() {
 
   const handleUpdateRolePermissions = (newPerms: Record<UserRole, UserPermissions>) => {
     setRolePermissions(newPerms);
-    localStorage.setItem(STORAGE_KEY_ROLE_PERMS, JSON.stringify(newPerms));
+    try {
+      localStorage.setItem(STORAGE_KEY_ROLE_PERMS, JSON.stringify(newPerms));
+    } catch {}
+
+    // Update all users in state and sync their permissions based on role
+    const updatedUsers = users.map((u) => ({
+      ...u,
+      permissions: newPerms[u.role] || DEFAULT_ROLE_PERMISSIONS[u.role],
+    }));
+    setUsers(updatedUsers);
+
+    // If current logged-in user is affected, update active session permissions immediately
+    if (currentUser) {
+      const updatedCurrentUser: UserAccount = {
+        ...currentUser,
+        permissions: newPerms[currentUser.role] || DEFAULT_ROLE_PERMISSIONS[currentUser.role],
+      };
+      setCurrentUser(updatedCurrentUser);
+      try {
+        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(updatedCurrentUser));
+      } catch {}
+    }
+
+    // Immediately push to Cloud Firestore so all mobile/desktop devices receive it in real-time
+    syncToCloud({ rolePermissions: newPerms, users: updatedUsers });
+    logAudit('Update Matriks Hak Akses', 'USERS', `Master Admin memperbarui matriks hak akses akun & modul`);
+    showToast('Hak akses modul & akun berhasil disimpan & tersinkronisasi ke seluruh perangkat.', 'success');
   };
 
   const handleLogout = () => {
@@ -558,6 +584,54 @@ export default function App() {
       console.error('Save config error', e);
     }
   }, [dashboardConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_ROLE_PERMS, JSON.stringify(rolePermissions));
+    } catch (e) {
+      console.error('Save role perms error', e);
+    }
+  }, [rolePermissions]);
+
+  // Handle Mobile / Cross-Device Reconnect & Screen Wake
+  useEffect(() => {
+    const handleVisibilityOrOnline = () => {
+      if (document.visibilityState === 'visible' || navigator.onLine) {
+        const current = latestStateRef.current;
+        fetchFreshWarehouseData({
+          items: current.items,
+          transactions: current.transactions,
+          employees: current.employees,
+          users: current.users,
+          loans: current.loans,
+          auditLogs: current.auditLogs,
+          rolePermissions: current.rolePermissions,
+          dashboardConfig: current.dashboardConfig,
+        }).then((cloudData) => {
+          if (cloudData) {
+            if (Array.isArray(cloudData.items)) setItems(sanitizeItemsList(cloudData.items));
+            if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
+            if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
+            if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
+            if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
+            if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
+            if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
+            if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
+          }
+        }).catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrOnline);
+    window.addEventListener('online', handleVisibilityOrOnline);
+    window.addEventListener('focus', handleVisibilityOrOnline);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
+      window.removeEventListener('online', handleVisibilityOrOnline);
+      window.removeEventListener('focus', handleVisibilityOrOnline);
+    };
+  }, []);
 
   // Toast notification helper
   const showToast = (text: string, type: 'success' | 'info' | 'warning' = 'success') => {
@@ -1311,6 +1385,7 @@ export default function App() {
         activeLoansCount={activeLoansCount}
         pendingApprovalsCount={pendingApprovalsCount}
         currentUser={currentUser}
+        rolePermissions={rolePermissions}
         employeeCount={employees.length}
         config={dashboardConfig}
         onOpenEmployeeModal={() => setIsEmployeeModalOpen(true)}
@@ -1357,6 +1432,7 @@ export default function App() {
             loans={loans}
             currentUser={currentUser}
             config={dashboardConfig}
+            rolePermissions={rolePermissions}
             employees={employees}
             onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
             onOpenScanner={() => setIsScannerOpen(true)}
@@ -1381,6 +1457,7 @@ export default function App() {
             transactions={transactions}
             employees={employees}
             currentUser={currentUser}
+            rolePermissions={rolePermissions}
             initialSelectedItem={selectedScannedItem}
             onClearInitialItem={() => setSelectedScannedItem(null)}
             onOpenScanner={() => setIsScannerOpen(true)}
@@ -1398,6 +1475,7 @@ export default function App() {
           <IncomingGoodsView
             items={items}
             currentUser={currentUser}
+            rolePermissions={rolePermissions}
             onOpenScanner={() => setIsScannerOpen(true)}
             onSubmitTransaction={handleSubmitTransaction}
             onNavigateToStock={() => setActiveTab('stock')}
@@ -1445,6 +1523,7 @@ export default function App() {
             items={items}
             employees={employees}
             currentUser={currentUser}
+            rolePermissions={rolePermissions}
             onAddLoan={handleAddLoan}
             onReturnLoan={handleReturnLoan}
             onDeleteLoan={handleDeleteLoan}

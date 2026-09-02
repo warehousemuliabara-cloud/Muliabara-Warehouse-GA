@@ -24,8 +24,8 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { Item, ItemLoan, Employee, UserAccount, LoanStatus } from '../types';
-import { DEPARTMENTS } from '../data/initialData';
+import { Item, ItemLoan, Employee, UserAccount, LoanStatus, UserRole, UserPermissions } from '../types';
+import { DEPARTMENTS, DEFAULT_ROLE_PERMISSIONS } from '../data/initialData';
 import { BarcodeRenderer } from './BarcodeRenderer';
 import { ConfirmationModal } from './ConfirmationModal';
 import { playScanBeep } from '../utils/helpers';
@@ -35,6 +35,7 @@ interface ItemLoanViewProps {
   items: Item[];
   employees: Employee[];
   currentUser: UserAccount;
+  rolePermissions?: Record<UserRole, UserPermissions>;
   onAddLoan: (loan: ItemLoan) => void;
   onReturnLoan: (loanId: string, returnCondition: 'BAIK' | 'RUSAK_RINGAN' | 'RUSAK_BERAT' | 'HILANG', notes: string) => void;
   onDeleteLoan: (loanId: string) => void;
@@ -45,10 +46,15 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
   items,
   employees,
   currentUser,
+  rolePermissions,
   onAddLoan,
   onReturnLoan,
   onDeleteLoan,
 }) => {
+  const currentPerms = (rolePermissions && rolePermissions[currentUser.role]) || currentUser.permissions || DEFAULT_ROLE_PERMISSIONS[currentUser.role] || DEFAULT_ROLE_PERMISSIONS.USER_OPERATIONAL;
+  const canManageLoans = currentPerms.canManageLoans ?? true;
+  const canDeleteLoan = currentPerms.canDeleteLoanRecords ?? (currentUser.role === 'MASTER_ADMIN');
+
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -265,14 +271,16 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
             <span>Export CSV</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="px-4 py-2 bg-[#1B5E20] hover:bg-[#66BB6A] text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-4 h-4 text-[#A5D6A7]" />
-            <span>Pinjamkan Barang</span>
-          </button>
+          {canManageLoans && (
+            <button
+              type="button"
+              onClick={() => setIsAddModalOpen(true)}
+              className="px-4 py-2 bg-[#1B5E20] hover:bg-[#66BB6A] text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-[#A5D6A7]" />
+              <span>Pinjamkan Barang</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -616,7 +624,7 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
 
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        {!isReturned && (
+                        {!isReturned && canManageLoans && (
                           <button
                             type="button"
                             onClick={() => {
@@ -641,14 +649,16 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                           <Printer className="w-3.5 h-3.5" />
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => setLoanToDelete(loan)}
-                          title="Hapus Catatan"
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {canDeleteLoan && (
+                          <button
+                            type="button"
+                            onClick={() => setLoanToDelete(loan)}
+                            title="Hapus Catatan"
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

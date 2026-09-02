@@ -33,7 +33,7 @@ import {
   BarChart, 
   Bar 
 } from 'recharts';
-import { Item, Transaction, ItemLoan, UserAccount, DashboardConfig, Employee } from '../types';
+import { Item, Transaction, ItemLoan, UserAccount, DashboardConfig, Employee, UserRole, UserPermissions } from '../types';
 import { CompanyLogo } from './CompanyLogo';
 import { BarcodePrintMode } from './BarcodeSheetModal';
 import { getThemeConfig } from '../utils/themeStyles';
@@ -44,6 +44,7 @@ interface DashboardOverviewProps {
   loans: ItemLoan[];
   currentUser: UserAccount;
   config: DashboardConfig;
+  rolePermissions?: Record<UserRole, UserPermissions>;
   employees?: Employee[];
   onOpenSettingsModal: () => void;
   onOpenScanner?: () => void;
@@ -63,6 +64,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   loans,
   currentUser,
   config,
+  rolePermissions,
   employees = [],
   onOpenSettingsModal,
   onOpenScanner,

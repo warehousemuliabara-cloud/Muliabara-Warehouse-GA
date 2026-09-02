@@ -133,15 +133,20 @@ let lastAppliedHash = '';
 function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
   try {
     const txSummary = (data.transactions || [])
+      .slice(0, 20)
       .map((t) => `${t.id || t.transactionNumber}:${t.status}:${t.updatedAt || t.date || ''}`)
       .join('|');
+    const itemStockSum = (data.items || []).reduce((acc, i) => acc + (Number(i.currentStock) || 0), 0);
     const itemSummary = (data.items || [])
+      .slice(0, 15)
       .map((i) => `${i.id || i.code}:${i.currentStock}`)
       .join('|');
     const empCount = (data.employees || []).length;
     const userCount = (data.users || []).length;
     const loanSummary = (data.loans || []).map((l) => `${l.id}:${l.status}`).join('|');
-    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}]_${txSummary}_it[${(data.items || []).length}]_${itemSummary}_e${empCount}_u${userCount}_l${loanSummary}`;
+    const rolePermsKey = JSON.stringify(data.rolePermissions || {});
+    const cfgKey = JSON.stringify(data.dashboardConfig || {});
+    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
   } catch {
     return String(Date.now());
   }

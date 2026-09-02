@@ -28,8 +28,8 @@ import {
   Clock3
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Item, Transaction, RequestItemEntry, Employee, UserAccount, RequestStatus } from '../types';
-import { DEPARTMENTS } from '../data/initialData';
+import { Item, Transaction, RequestItemEntry, Employee, UserAccount, RequestStatus, UserRole, UserPermissions } from '../types';
+import { DEPARTMENTS, DEFAULT_ROLE_PERMISSIONS } from '../data/initialData';
 import { 
   formatIndonesianDateTime, 
   generateTransactionNumber, 
@@ -41,6 +41,7 @@ interface ItemRequestViewProps {
   transactions: Transaction[];
   employees?: Employee[];
   currentUser: UserAccount;
+  rolePermissions?: Record<UserRole, UserPermissions>;
   initialSelectedItem?: Item | null;
   onClearInitialItem?: () => void;
   onOpenScanner?: () => void;
@@ -57,6 +58,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
   transactions,
   employees = [],
   currentUser,
+  rolePermissions,
   initialSelectedItem,
   onClearInitialItem,
   onOpenScanner,
@@ -67,6 +69,11 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
   onDispatchApprovedRequest,
   onNavigateToStock,
 }) => {
+  // Determine dynamic permissions based on active role matrix
+  const currentPerms = (rolePermissions && rolePermissions[currentUser.role]) || currentUser.permissions || DEFAULT_ROLE_PERMISSIONS[currentUser.role] || DEFAULT_ROLE_PERMISSIONS.USER_OPERATIONAL;
+  const canCreate = currentPerms.canCreateRequests ?? true;
+  const canApprove = currentPerms.canApproveRequests ?? (currentUser.role === 'MASTER_ADMIN' || currentUser.role === 'ADMIN');
+  const canDispatch = currentPerms.canDispatchGoods ?? (currentUser.role === 'MASTER_ADMIN' || currentUser.role === 'ADMIN' || currentUser.role === 'USER_OPERATIONAL');
   // Form fields
   const [requesterName, setRequesterName] = useState('');
   const [requesterPosition, setRequesterPosition] = useState('');
@@ -101,8 +108,6 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
   // Filter for Section 3 verification list
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED'>('ALL');
   const [verificationSearch, setVerificationSearch] = useState('');
-
-  const canApprove = currentUser.role === 'MASTER_ADMIN' || currentUser.role === 'ADMIN';
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -952,7 +957,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                               <span>Sudah Diapprove</span>
                             </span>
 
-                            {trx.status === 'APPROVED' && onDispatchApprovedRequest && (
+                            {trx.status === 'APPROVED' && onDispatchApprovedRequest && canDispatch && (
                               <button
                                 type="button"
                                 onClick={() => onDispatchApprovedRequest(trx.id)}

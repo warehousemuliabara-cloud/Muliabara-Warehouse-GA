@@ -17,7 +17,8 @@ import {
   Check
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Item, Transaction, RequestItemEntry, UserAccount } from '../types';
+import { Item, Transaction, RequestItemEntry, UserAccount, UserRole, UserPermissions } from '../types';
+import { DEFAULT_ROLE_PERMISSIONS } from '../data/initialData';
 import { 
   formatIndonesianDateTime, 
   generateTransactionNumber 
@@ -26,6 +27,7 @@ import {
 interface IncomingGoodsViewProps {
   items: Item[];
   currentUser?: UserAccount;
+  rolePermissions?: Record<UserRole, UserPermissions>;
   onOpenScanner: () => void;
   onSubmitTransaction: (trx: Transaction) => void;
   onNavigateToStock: () => void;
@@ -34,9 +36,13 @@ interface IncomingGoodsViewProps {
 export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
   items,
   currentUser,
+  rolePermissions,
   onOpenScanner,
   onSubmitTransaction,
 }) => {
+  // Determine dynamic permissions based on active role matrix
+  const currentPerms = (rolePermissions && currentUser?.role && rolePermissions[currentUser.role]) || currentUser?.permissions || (currentUser?.role ? DEFAULT_ROLE_PERMISSIONS[currentUser.role] : DEFAULT_ROLE_PERMISSIONS.USER_OPERATIONAL);
+  const canReceive = currentPerms ? (currentPerms.canReceiveIncomingGoods ?? true) : true;
   // Asal Barang selection: 'Samarinda' | 'Kota Bangun' | Custom
   const [originType, setOriginType] = useState<'Samarinda' | 'Kota Bangun'>('Samarinda');
   const [customOriginDetails, setCustomOriginDetails] = useState('');
@@ -662,7 +668,7 @@ export const IncomingGoodsView: React.FC<IncomingGoodsViewProps> = ({
             </button>
             <button
               type="submit"
-              disabled={incomingItems.length === 0 || !receivedByOfficer.trim()}
+              disabled={incomingItems.length === 0 || !receivedByOfficer.trim() || !canReceive}
               className="px-5 py-2 bg-[#1B5E20] hover:bg-[#66BB6A] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
             >
               <PlusCircle className="w-4 h-4 text-[#A5D6A7]" />

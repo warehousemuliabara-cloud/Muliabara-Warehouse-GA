@@ -14,7 +14,7 @@ import {
   SlidersHorizontal,
   FileSpreadsheet
 } from 'lucide-react';
-import { UserAccount, DashboardConfig } from '../types';
+import { UserAccount, DashboardConfig, UserRole, UserPermissions } from '../types';
 import { getThemeConfig } from '../utils/themeStyles';
 
 export type MainTabType = 'dashboard' | 'request' | 'incoming' | 'stock' | 'loans' | 'transactions';
@@ -26,6 +26,7 @@ interface SubHeaderNavigationProps {
   lowStockCount?: number;
   activeLoansCount?: number;
   currentUser: UserAccount;
+  rolePermissions?: Record<UserRole, UserPermissions>;
   employeeCount?: number;
   config?: DashboardConfig;
   onOpenEmployeeModal?: () => void;
@@ -41,6 +42,7 @@ export const SubHeaderNavigation: React.FC<SubHeaderNavigationProps> = ({
   lowStockCount = 0,
   activeLoansCount = 0,
   currentUser,
+  rolePermissions,
   employeeCount = 0,
   config,
   onOpenEmployeeModal,
