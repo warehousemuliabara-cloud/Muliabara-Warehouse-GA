@@ -51,7 +51,35 @@ export const PublicRequestPortalView: React.FC<PublicRequestPortalViewProps> = (
   const [department, setDepartment] = useState('');
   const [notes, setNotes] = useState('');
   
-  // Multiple requested items support
+  // Custom Searchable & Scrollable Employee Dropdown (Requirement 12)
+  const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false);
+  const [employeeSearchInput, setEmployeeSearchInput] = useState('');
+  const employeeDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Close employee dropdown on click outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (employeeDropdownRef.current && !employeeDropdownRef.current.contains(event.target as Node)) {
+        setIsEmployeeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filtered employees list for dropdown
+  const filteredEmployees = useMemo(() => {
+    const term = (employeeSearchInput || requesterName).toLowerCase();
+    if (!term) return employees;
+    return employees.filter(
+      (e) =>
+        e.name.toLowerCase().includes(term) ||
+        (e.department && e.department.toLowerCase().includes(term)) ||
+        (e.position && e.position.toLowerCase().includes(term))
+    );
+  }, [employees, employeeSearchInput, requesterName]);
+
+  // Multiple requested items support (Requirement 11)
   const [selectedItems, setSelectedItems] = useState<{ itemId: string; quantity: number }[]>([]);
   const [activeItemSearch, setActiveItemSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
@@ -358,30 +386,72 @@ export const PublicRequestPortalView: React.FC<PublicRequestPortalViewProps> = (
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Nama Pemohon dengan Autocomplete */}
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
-                    Nama Lengkap Pemohon <span className="text-rose-400">*</span>
+                {/* Nama Pemohon dengan Searchable & Scrollable Dropdown (Requirement 12) */}
+                <div className="space-y-1 relative" ref={employeeDropdownRef}>
+                  <label className="font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Nama Lengkap Pemohon <span className="text-rose-400">*</span></span>
+                    <span className="text-[10px] text-indigo-400 font-normal">Cari & Scroll Nama</span>
                   </label>
                   <div className="relative">
                     <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      list="employee-names"
                       value={requesterName}
-                      onChange={(e) => handleSelectEmployee(e.target.value)}
-                      placeholder="Ketik atau pilih nama karyawan..."
+                      onFocus={() => setIsEmployeeDropdownOpen(true)}
+                      onChange={(e) => {
+                        setRequesterName(e.target.value);
+                        setEmployeeSearchInput(e.target.value);
+                        setIsEmployeeDropdownOpen(true);
+                      }}
+                      placeholder="Ketik atau pilih nama personil / pemohon..."
                       required
-                      className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder:text-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                      className="w-full pl-9 pr-8 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder:text-slate-600 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                     />
-                    <datalist id="employee-names">
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.name}>
-                          {emp.department ? `${emp.department} - ${emp.position}` : emp.position}
-                        </option>
-                      ))}
-                    </datalist>
+                    {requesterName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRequesterName('');
+                          setEmployeeSearchInput('');
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
+
+                  {isEmployeeDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                      {filteredEmployees.length === 0 ? (
+                        <div className="p-3 text-center text-slate-500 text-xs">
+                          Nama "{employeeSearchInput || requesterName}" tidak ditemukan di database. Anda tetap dapat melanjutkan mengetik nama manual.
+                        </div>
+                      ) : (
+                        filteredEmployees.map((emp) => (
+                          <button
+                            key={emp.id}
+                            type="button"
+                            onClick={() => {
+                              handleSelectEmployee(emp.name);
+                              setIsEmployeeDropdownOpen(false);
+                            }}
+                            className="w-full p-2.5 text-left hover:bg-indigo-600/30 flex items-center justify-between text-xs cursor-pointer transition-colors"
+                          >
+                            <div>
+                              <div className="font-bold text-white">{emp.name}</div>
+                              <div className="text-[10px] text-slate-400">
+                                {emp.position} • {emp.department}
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-mono text-indigo-400 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                              Pilih
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Divisi / Departemen */}
@@ -432,7 +502,7 @@ export const PublicRequestPortalView: React.FC<PublicRequestPortalViewProps> = (
                 </span>
               </div>
 
-              {/* Search & Filter Barang */}
+              {/* Search & Filter Barang (Requirement 11) */}
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <div className="relative flex-1 min-w-[200px]">
                   <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -440,17 +510,26 @@ export const PublicRequestPortalView: React.FC<PublicRequestPortalViewProps> = (
                     type="text"
                     value={activeItemSearch}
                     onChange={(e) => setActiveItemSearch(e.target.value)}
-                    placeholder="Cari nama barang atau SKU..."
-                    className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs placeholder:text-slate-600 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                    placeholder="Cari nama barang, kode SKU, atau lokasi rak..."
+                    className="w-full pl-8 pr-7 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs placeholder:text-slate-600 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                   />
+                  {activeItemSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveItemSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs focus:ring-2 focus:ring-indigo-500"
+                  className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                 >
-                  <option value="ALL">Semua Kategori</option>
+                  <option value="ALL">Semua Kategori ({items.length})</option>
                   {categories.map((cat) => (
                     <option key={cat} value={cat}>
                       {cat}
@@ -459,8 +538,14 @@ export const PublicRequestPortalView: React.FC<PublicRequestPortalViewProps> = (
                 </select>
               </div>
 
-              {/* Items Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1">
+              {/* Items Count & Scroll Info */}
+              <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                <span>Ditemukan: <strong className="text-white">{availableItems.length}</strong> barang tersedia</span>
+                <span className="text-slate-500">Scroll ke bawah untuk melihat semua</span>
+              </div>
+
+              {/* Items Grid - Scrollable & Responsive */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-80 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-700">
                 {availableItems.length === 0 ? (
                   <div className="col-span-full py-8 text-center text-slate-500 text-xs">
                     Tidak ada barang yang cocok atau stok gudang sedang kosong.

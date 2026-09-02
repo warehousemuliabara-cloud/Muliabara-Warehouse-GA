@@ -59,14 +59,15 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
   const [isCopied, setIsCopied] = useState(false);
   const [qrLayoutType, setQrLayoutType] = useState<'A4_POSTER' | 'TABLE_STANDEE' | 'COMPACT_STICKER'>('TABLE_STANDEE');
 
-  // Update mode when opened
+  // Update mode only once when opened to prevent flicker/reset when background sync triggers
+  const prevIsOpenRef = React.useRef(isOpen);
   React.useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       setPrintMode(initialMode || 'STOCK');
-      // By default select all items in master stock
       setSelectedIds(items.map((i) => i.id));
     }
-  }, [isOpen, initialMode, items]);
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, initialMode]);
 
   // Derive request portal URL
   const portalUrl = useMemo(() => {

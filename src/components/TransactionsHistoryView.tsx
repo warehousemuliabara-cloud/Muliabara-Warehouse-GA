@@ -25,6 +25,13 @@ import { Transaction, UserAccount, UserRole, UserPermissions } from '../types';
 import { BarcodeRenderer } from './BarcodeRenderer';
 import { CompanyLogo } from './CompanyLogo';
 
+export interface ClearTransactionOptions {
+  scope: 'ALL' | 'IN' | 'OUT';
+  period: 'ALL' | '3_MONTHS' | '1_MONTH' | '7_DAYS' | 'CUSTOM';
+  customStart?: string;
+  customEnd?: string;
+}
+
 interface TransactionsHistoryViewProps {
   transactions: Transaction[];
   companyLogo?: string | null;
@@ -32,7 +39,7 @@ interface TransactionsHistoryViewProps {
   rolePermissions?: Record<UserRole, UserPermissions>;
   onOpenScanner?: () => void;
   onDeleteTransaction: (transactionId: string, revertStock: boolean) => void;
-  onClearTransactions: (type: 'ALL' | 'IN' | 'OUT') => void;
+  onClearTransactions: (options: ClearTransactionOptions) => void;
 }
 
 export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = ({
@@ -62,9 +69,12 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
   const [deletingTransaction, setDeletingTransaction] = useState<Transaction | null>(null);
   const [revertStockOnDelete, setRevertStockOnDelete] = useState<boolean>(true);
 
-  // Clear all / bulk history modal state
+  // Clear all / bulk history modal state with period options (Requirement 8)
   const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false);
   const [clearScope, setClearScope] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
+  const [clearPeriod, setClearPeriod] = useState<'ALL' | '3_MONTHS' | '1_MONTH' | '7_DAYS' | 'CUSTOM'>('3_MONTHS');
+  const [customClearStart, setCustomClearStart] = useState('');
+  const [customClearEnd, setCustomClearEnd] = useState('');
 
   // Limit display to 10 rows by default
   const [showAllTransactions, setShowAllTransactions] = useState(false);
@@ -900,80 +910,141 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
               </button>
             </div>
 
-            <div className="p-5 space-y-3">
-              <p className="text-xs text-slate-600">
-                Pilih cakupan riwayat transaksi yang ingin Anda bersihkan dari sistem:
-              </p>
-
-              <div className="space-y-2">
-                <label 
-                  onClick={() => setClearScope('ALL')}
-                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                    clearScope === 'ALL'
-                      ? 'border-rose-500 bg-rose-50/60 font-bold text-rose-900'
-                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="radio" 
-                      name="clearScope" 
-                      checked={clearScope === 'ALL'} 
-                      onChange={() => setClearScope('ALL')}
-                      className="text-rose-600"
-                    />
-                    <span>Hapus Semua Riwayat Transaksi</span>
-                  </div>
-                  <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
-                    {transactions.length} total
-                  </span>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  1. Pilih Jenis Transaksi:
                 </label>
+                <div className="space-y-1.5">
+                  <label 
+                    onClick={() => setClearScope('ALL')}
+                    className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                      clearScope === 'ALL'
+                        ? 'border-rose-500 bg-rose-50/60 font-bold text-rose-900'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="radio" 
+                        name="clearScope" 
+                        checked={clearScope === 'ALL'} 
+                        onChange={() => setClearScope('ALL')}
+                        className="text-rose-600"
+                      />
+                      <span>Semua Riwayat Transaksi (IN & OUT)</span>
+                    </div>
+                    <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
+                      {transactions.length} total
+                    </span>
+                  </label>
 
-                <label 
-                  onClick={() => setClearScope('OUT')}
-                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                    clearScope === 'OUT'
-                      ? 'border-amber-500 bg-amber-50/60 font-bold text-amber-900'
-                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="radio" 
-                      name="clearScope" 
-                      checked={clearScope === 'OUT'} 
-                      onChange={() => setClearScope('OUT')}
-                      className="text-amber-600"
-                    />
-                    <span>Hanya Transaksi Barang Keluar (OUT)</span>
-                  </div>
-                  <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
-                    {transactions.filter(t => t.type === 'OUT').length}
-                  </span>
-                </label>
+                  <label 
+                    onClick={() => setClearScope('OUT')}
+                    className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                      clearScope === 'OUT'
+                        ? 'border-amber-500 bg-amber-50/60 font-bold text-amber-900'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="radio" 
+                        name="clearScope" 
+                        checked={clearScope === 'OUT'} 
+                        onChange={() => setClearScope('OUT')}
+                        className="text-amber-600"
+                      />
+                      <span>Hanya Transaksi Barang Keluar (OUT)</span>
+                    </div>
+                    <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
+                      {transactions.filter(t => t.type === 'OUT').length}
+                    </span>
+                  </label>
 
-                <label 
-                  onClick={() => setClearScope('IN')}
-                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                    clearScope === 'IN'
-                      ? 'border-[#66BB6A] bg-[#E8F5E9] font-bold text-[#1B5E20]'
-                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="radio" 
-                      name="clearScope" 
-                      checked={clearScope === 'IN'} 
-                      onChange={() => setClearScope('IN')}
-                      className="text-[#1B5E20]"
-                    />
-                    <span>Hanya Transaksi Barang Masuk (IN)</span>
-                  </div>
-                  <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
-                    {transactions.filter(t => t.type === 'IN').length}
-                  </span>
+                  <label 
+                    onClick={() => setClearScope('IN')}
+                    className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                      clearScope === 'IN'
+                        ? 'border-[#66BB6A] bg-[#E8F5E9] font-bold text-[#1B5E20]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="radio" 
+                        name="clearScope" 
+                        checked={clearScope === 'IN'} 
+                        onChange={() => setClearScope('IN')}
+                        className="text-[#1B5E20]"
+                      />
+                      <span>Hanya Transaksi Barang Masuk (IN)</span>
+                    </div>
+                    <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
+                      {transactions.filter(t => t.type === 'IN').length}
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Requirement 8: Pilihan Periode Yang Akan Dihapus */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  2. Pilih Periode Waktu yang Dihapus:
                 </label>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setClearPeriod('3_MONTHS')}
+                    className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                      clearPeriod === '3_MONTHS'
+                        ? 'border-[#1B5E20] bg-[#E8F5E9] text-[#1B5E20] font-bold ring-1 ring-[#1B5E20]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div>&gt; 3 Bulan Lalu</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Hapus yang lebih dari 90 hari</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setClearPeriod('1_MONTH')}
+                    className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                      clearPeriod === '1_MONTH'
+                        ? 'border-[#1B5E20] bg-[#E8F5E9] text-[#1B5E20] font-bold ring-1 ring-[#1B5E20]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div>&gt; 1 Bulan Lalu</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Hapus yang lebih dari 30 hari</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setClearPeriod('7_DAYS')}
+                    className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                      clearPeriod === '7_DAYS'
+                        ? 'border-[#1B5E20] bg-[#E8F5E9] text-[#1B5E20] font-bold ring-1 ring-[#1B5E20]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div>&gt; 7 Hari Lalu</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Hapus yang lebih dari 7 hari</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setClearPeriod('ALL')}
+                    className={`p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                      clearPeriod === 'ALL'
+                        ? 'border-rose-500 bg-rose-50 text-rose-800 font-bold ring-1 ring-rose-500'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div>Hapus Semua Periode</div>
+                    <div className="text-[10px] text-slate-500 font-normal">Hapus total tanpa batas tanggal</div>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -988,13 +1059,18 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
               <button
                 type="button"
                 onClick={() => {
-                  onClearTransactions(clearScope);
+                  onClearTransactions({
+                    scope: clearScope,
+                    period: clearPeriod,
+                    customStart: customClearStart,
+                    customEnd: customClearEnd,
+                  });
                   setIsClearHistoryModalOpen(false);
                 }}
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Bersihkan Riwayat</span>
+                <span>Bersihkan Riwayat Sesuai Periode</span>
               </button>
             </div>
           </div>

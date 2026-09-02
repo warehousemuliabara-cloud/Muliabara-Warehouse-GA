@@ -108,6 +108,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
   // Filter for Section 3 verification list
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED'>('ALL');
   const [verificationSearch, setVerificationSearch] = useState('');
+  const [verificationDate, setVerificationDate] = useState<string>(() => new Date().toISOString().substring(0, 10));
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -331,6 +332,9 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const filteredRecentRequests = outTransactionsList.filter((t) => {
+    const trxDateStr = t.date ? t.date.substring(0, 10) : '';
+    const matchesDate = !verificationDate || trxDateStr === verificationDate || t.date === verificationDate || t.dateFormatted === verificationDate;
+
     const term = verificationSearch.toLowerCase();
     const matchesSearch =
       t.transactionNumber.toLowerCase().includes(term) ||
@@ -344,7 +348,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
       (statusFilter === 'PENDING' && t.status === 'PENDING') ||
       (statusFilter === 'APPROVED' && (t.status === 'APPROVED' || t.status === 'COMPLETED'));
 
-    return matchesSearch && matchesStatus;
+    return matchesDate && matchesSearch && matchesStatus;
   });
 
   const handleExecuteApproval = () => {
@@ -495,13 +499,13 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                 </div>
 
                 {isEmployeeDropdownOpen && filteredEmployeesList.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-48 overflow-y-auto divide-y divide-slate-100">
-                    {filteredEmployeesList.slice(0, 8).map((emp) => (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-60 overflow-y-auto divide-y divide-slate-100">
+                    {filteredEmployeesList.map((emp) => (
                       <button
                         key={emp.id}
                         type="button"
                         onClick={() => handleSelectEmployee(emp)}
-                        className="w-full p-2 text-left hover:bg-[#E8F5E9] flex items-center justify-between text-xs cursor-pointer transition-colors"
+                        className="w-full p-2.5 text-left hover:bg-[#E8F5E9] flex items-center justify-between text-xs cursor-pointer transition-colors"
                       >
                         <div>
                           <div className="font-bold text-slate-900">{emp.name}</div>
@@ -838,10 +842,24 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
           {/* 3. VERIFIKASI APPROVAL (PEMBERITAHUAN SUDAH DIAPPROVE ATAU BELUM DIAPPROVE) */}
           <div className="border-t border-slate-200/80 pt-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                <FileCheck2 className="w-3.5 h-3.5 text-[#1B5E20]" />
-                <span>3. Status Verifikasi Approval</span>
-              </h4>
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                  <FileCheck2 className="w-3.5 h-3.5 text-[#1B5E20]" />
+                  <span>3. Status Verifikasi Approval</span>
+                </h4>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-[#1B5E20]" />
+                    <span>Tanggal:</span>
+                  </span>
+                  <input
+                    type="date"
+                    value={verificationDate}
+                    onChange={(e) => setVerificationDate(e.target.value)}
+                    className="text-xs font-bold px-2 py-0.5 border border-slate-300 rounded-lg bg-white text-slate-800"
+                  />
+                </div>
+              </div>
 
               {/* Status Tabs */}
               <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
@@ -852,7 +870,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                     statusFilter === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
                   }`}
                 >
-                  Semua ({outTransactionsList.length})
+                  Semua ({filteredRecentRequests.length})
                 </button>
                 <button
                   type="button"
@@ -862,7 +880,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                   }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                  Belum Diapprove ({outTransactionsList.filter((t) => t.status === 'PENDING').length})
+                  Belum Diapprove ({filteredRecentRequests.filter((t) => t.status === 'PENDING').length})
                 </button>
                 <button
                   type="button"
@@ -872,7 +890,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                   }`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                  Sudah Diapprove ({outTransactionsList.filter((t) => t.status === 'APPROVED' || t.status === 'COMPLETED').length})
+                  Sudah Diapprove ({filteredRecentRequests.filter((t) => t.status === 'APPROVED' || t.status === 'COMPLETED').length})
                 </button>
               </div>
             </div>

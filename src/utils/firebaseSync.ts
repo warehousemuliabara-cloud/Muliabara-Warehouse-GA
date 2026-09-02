@@ -190,9 +190,31 @@ const getLoanRank = (l: any): number => {
 };
 
 /**
- * Robust Bidirectional Smart Merger:
- * Combines local and cloud records so that NO TRANSACTION OR ITEM IS EVER LOST.
- * If a transaction exists only locally or only in cloud, both are preserved.
+ * Filter out transactions older than 3 months (90 days) based on their transaction date.
+ * Requirement 1: Automatic 3-month pruning based on transaction date.
+ */
+export function filterTransactionsWithin3Months<T extends { date?: string; timestamp?: string; createdAt?: string }>(
+  transactions: T[]
+): T[] {
+  if (!Array.isArray(transactions)) return [];
+  const now = new Date();
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(now.getMonth() - 3);
+  const cutoffTime = threeMonthsAgo.getTime();
+
+  return transactions.filter((trx) => {
+    const rawDate = trx.date || trx.timestamp || trx.createdAt;
+    if (!rawDate) return true;
+    const trxTime = new Date(rawDate).getTime();
+    if (isNaN(trxTime)) return true;
+    return trxTime >= cutoffTime;
+  });
+}
+
+/**
+ * Robust Smart Merger:
+ * Cloud Firestore is the authoritative source of truth.
+ * When merging, transactions older than 3 months are pruned automatically.
  */
 export function smartMergeWarehouseData(
   local?: Partial<WarehouseSyncPayload>,
@@ -201,140 +223,19 @@ export function smartMergeWarehouseData(
   const localObj = local || {};
   const remoteObj = remote || {};
 
-  // 1. Merge Transactions (Union by ID / Transaction Number, highest status rank & newest timestamp wins)
-  const trxMap = new Map<string, any>();
-
-  // Add remote transactions first (Cloud authoritative)
-  (remoteObj.transactions || []).forEach((t: any) => {
-    const key = String(t.id || t.transactionNumber || '').trim();
-    if (key) trxMap.set(key, t);
-  });
-
-  // Add or update with local transactions (if local has new items not yet in cloud or newer updates)
-  (localObj.transactions || []).forEach((t: any) => {
-    const key = String(t.id || t.transactionNumber || '').trim();
-    if (!key) return;
-
-    if (!trxMap.has(key)) {
-      trxMap.set(key, t);
-    } else {
-      const existing = trxMap.get(key);
-      const localRank = getTrxRank(t);
-      const remoteRank = getTrxRank(existing);
-
-      if (localRank > remoteRank) {
-        trxMap.set(key, { ...existing, ...t });
-      } else if (remoteRank > localRank) {
-        trxMap.set(key, { ...t, ...existing });
-      } else {
-        const localTime = new Date(t.updatedAt || t.date || 0).getTime();
-        const remoteTime = new Date(existing.updatedAt || existing.date || 0).getTime();
-        if (localTime >= remoteTime) {
-          trxMap.set(key, { ...existing, ...t });
-        } else {
-          trxMap.set(key, { ...t, ...existing });
-        }
-      }
-    }
-  });
-
-  const mergedTransactions = Array.from(trxMap.values()).sort(
+  // If remote exists, remote is authoritative for transactions, loans, and items
+  let mergedTransactions = remoteObj.transactions ? [...remoteObj.transactions] : (localObj.transactions || []);
+  mergedTransactions = filterTransactionsWithin3Months(mergedTransactions).sort(
     (a, b) => new Date(b.date || b.updatedAt || 0).getTime() - new Date(a.date || a.updatedAt || 0).getTime()
   );
 
-  // 2. Merge Items (Union by ID / Code)
-  // Remote items from Cloud take precedence unless local has explicit user edit timestamp
-  const itemMap = new Map<string, any>();
-  (remoteObj.items || []).forEach((it: any) => {
-    const key = String(it.id || it.code || '').trim().toLowerCase();
-    if (key) itemMap.set(key, it);
-  });
+  let mergedLoans = remoteObj.loans ? [...remoteObj.loans] : (localObj.loans || []);
+  let mergedItems = remoteObj.items && remoteObj.items.length > 0 ? remoteObj.items : (localObj.items || []);
+  let mergedEmployees = remoteObj.employees && remoteObj.employees.length > 0 ? remoteObj.employees : (localObj.employees || []);
+  let mergedUsers = remoteObj.users && remoteObj.users.length > 0 ? remoteObj.users : (localObj.users || []);
+  let mergedAuditLogs = (remoteObj.auditLogs || localObj.auditLogs || []).slice(0, 200);
 
-  (localObj.items || []).forEach((it: any) => {
-    const key = String(it.id || it.code || '').trim().toLowerCase();
-    if (!key) return;
-    if (!itemMap.has(key)) {
-      itemMap.set(key, it);
-    } else {
-      const existing = itemMap.get(key);
-      const localTime = new Date(it.updatedAt || 0).getTime();
-      const remoteTime = new Date(existing.updatedAt || 0).getTime();
-      // Only override remote item if local item has a distinctly newer explicit update timestamp
-      if (localTime > remoteTime && remoteTime > 0) {
-        itemMap.set(key, { ...existing, ...it });
-      } else {
-        itemMap.set(key, { ...it, ...existing });
-      }
-    }
-  });
-  const mergedItems = Array.from(itemMap.values());
-
-  // 3. Merge Employees (Union by ID / NIK)
-  const empMap = new Map<string, any>();
-  (remoteObj.employees || []).forEach((e: any) => {
-    const key = String(e.id || e.nik || e.name || '').trim().toLowerCase();
-    if (key) empMap.set(key, e);
-  });
-  (localObj.employees || []).forEach((e: any) => {
-    const key = String(e.id || e.nik || e.name || '').trim().toLowerCase();
-    if (key && !empMap.has(key)) empMap.set(key, e);
-  });
-  const mergedEmployees = Array.from(empMap.values());
-
-  // 4. Merge Users (Union by ID / Username)
-  const userMap = new Map<string, any>();
-  (remoteObj.users || []).forEach((u: any) => {
-    const key = String(u.id || u.username || '').trim().toLowerCase();
-    if (key) userMap.set(key, u);
-  });
-  (localObj.users || []).forEach((u: any) => {
-    const key = String(u.id || u.username || '').trim().toLowerCase();
-    if (key && !userMap.has(key)) userMap.set(key, u);
-  });
-  const mergedUsers = Array.from(userMap.values());
-
-  // 5. Merge Loans (Union by ID, highest rank and latest return date wins)
-  const loanMap = new Map<string, any>();
-  (remoteObj.loans || []).forEach((l: any) => {
-    if (l.id) loanMap.set(l.id, l);
-  });
-  (localObj.loans || []).forEach((l: any) => {
-    if (l.id) {
-      if (!loanMap.has(l.id)) {
-        loanMap.set(l.id, l);
-      } else {
-        const existing = loanMap.get(l.id);
-        const localRank = getLoanRank(l);
-        const remoteRank = getLoanRank(existing);
-
-        if (localRank > remoteRank) {
-          loanMap.set(l.id, { ...existing, ...l });
-        } else if (remoteRank > localRank) {
-          loanMap.set(l.id, { ...l, ...existing });
-        } else {
-          const localTime = new Date(l.updatedAt || l.actualReturnDate || l.borrowDate || 0).getTime();
-          const remoteTime = new Date(existing.updatedAt || existing.actualReturnDate || existing.borrowDate || 0).getTime();
-          if (localTime >= remoteTime) loanMap.set(l.id, { ...existing, ...l });
-          else loanMap.set(l.id, { ...l, ...existing });
-        }
-      }
-    }
-  });
-  const mergedLoans = Array.from(loanMap.values());
-
-  // 6. Merge Audit Logs (Union by ID, sorted newest first, max 200)
-  const auditMap = new Map<string, any>();
-  (remoteObj.auditLogs || []).forEach((a: any) => {
-    if (a.id) auditMap.set(a.id, a);
-  });
-  (localObj.auditLogs || []).forEach((a: any) => {
-    if (a.id) auditMap.set(a.id, a);
-  });
-  const mergedAuditLogs = Array.from(auditMap.values())
-    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-    .slice(0, 200);
-
-  // 7. Role Permissions & Dashboard Config
+  // Merge permissions & config
   const mergedPermissions = {
     ...(localObj.rolePermissions || {}),
     ...(remoteObj.rolePermissions || {}),
@@ -346,10 +247,10 @@ export function smartMergeWarehouseData(
   };
 
   return {
-    items: mergedItems.length > 0 ? mergedItems : localObj.items || [],
+    items: mergedItems,
     transactions: mergedTransactions,
-    employees: mergedEmployees.length > 0 ? mergedEmployees : localObj.employees || [],
-    users: mergedUsers.length > 0 ? mergedUsers : localObj.users || [],
+    employees: mergedEmployees,
+    users: mergedUsers,
     loans: mergedLoans,
     auditLogs: mergedAuditLogs,
     rolePermissions: Object.keys(mergedPermissions).length > 0 ? mergedPermissions : localObj.rolePermissions || {},
@@ -362,7 +263,6 @@ export function smartMergeWarehouseData(
 
 /**
  * Direct fetch from Firestore server to get fresh authoritative cloud data.
- * Safely merges with local state so newly created transactions are NEVER lost.
  */
 export async function fetchFreshWarehouseData(
   currentLocal?: Partial<WarehouseSyncPayload>
@@ -374,24 +274,19 @@ export async function fetchFreshWarehouseData(
       updateSyncState('connected', 'Tersinkronisasi Cloud');
       const cloudData = snapshot.data() as WarehouseSyncPayload;
 
-      // Smart merge cloud data with current local records
-      const mergedData = currentLocal
-        ? smartMergeWarehouseData(currentLocal, cloudData)
-        : cloudData;
-
-      lastAppliedHash = computeDataHash(mergedData);
-
-      // If local had new transactions not yet in cloud, push merged result to Cloud
-      if (currentLocal && (currentLocal.transactions?.length || 0) > (cloudData.transactions?.length || 0)) {
-        pushWarehouseSync(mergedData).catch(() => {});
+      // Apply 3-month transaction filter
+      if (Array.isArray(cloudData.transactions)) {
+        cloudData.transactions = filterTransactionsWithin3Months(cloudData.transactions);
       }
 
-      return mergedData;
+      lastAppliedHash = computeDataHash(cloudData);
+      return cloudData;
     } else if (currentLocal) {
       // First time initialization on Cloud
+      const initialTransactions = filterTransactionsWithin3Months(currentLocal.transactions || []);
       const initialCloud: WarehouseSyncPayload = {
         items: currentLocal.items || [],
-        transactions: currentLocal.transactions || [],
+        transactions: initialTransactions,
         employees: currentLocal.employees || [],
         users: currentLocal.users || [],
         loans: currentLocal.loans || [],

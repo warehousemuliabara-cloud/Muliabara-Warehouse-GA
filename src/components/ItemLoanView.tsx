@@ -30,6 +30,10 @@ import { BarcodeRenderer } from './BarcodeRenderer';
 import { ConfirmationModal } from './ConfirmationModal';
 import { playScanBeep } from '../utils/helpers';
 
+export interface ClearLoanOptions {
+  scope: 'ALL' | 'RETURNED' | 'OLDER_3_MONTHS' | 'OLDER_1_MONTH' | 'OLDER_7_DAYS';
+}
+
 interface ItemLoanViewProps {
   loans: ItemLoan[];
   items: Item[];
@@ -39,6 +43,7 @@ interface ItemLoanViewProps {
   onAddLoan: (loan: ItemLoan) => void;
   onReturnLoan: (loanId: string, returnCondition: 'BAIK' | 'RUSAK_RINGAN' | 'RUSAK_BERAT' | 'HILANG', notes: string) => void;
   onDeleteLoan: (loanId: string) => void;
+  onClearLoans?: (options: ClearLoanOptions) => void;
 }
 
 export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
@@ -50,10 +55,12 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
   onAddLoan,
   onReturnLoan,
   onDeleteLoan,
+  onClearLoans,
 }) => {
   const currentPerms = (rolePermissions && rolePermissions[currentUser.role]) || currentUser.permissions || DEFAULT_ROLE_PERMISSIONS[currentUser.role] || DEFAULT_ROLE_PERMISSIONS.USER_OPERATIONAL;
   const canManageLoans = currentPerms.canManageLoans ?? true;
   const canDeleteLoan = currentPerms.canDeleteLoanRecords ?? (currentUser.role === 'MASTER_ADMIN');
+  const canClearLogs = currentPerms.canClearLogs ?? (currentUser.role === 'MASTER_ADMIN');
 
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -62,6 +69,10 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
   
   // Modal State for New Loan
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Modal State for Clear Loans (Requirement 9)
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [clearScope, setClearScope] = useState<'ALL' | 'RETURNED' | 'OLDER_3_MONTHS' | 'OLDER_1_MONTH' | 'OLDER_7_DAYS'>('OLDER_3_MONTHS');
   
   // Modal State for Returning Loan
   const [returningLoan, setReturningLoan] = useState<ItemLoan | null>(null);
@@ -262,6 +273,18 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {canClearLogs && onClearLoans && (
+            <button
+              type="button"
+              onClick={() => setIsClearModalOpen(true)}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Bersihkan Log Riwayat Peminjaman"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span className="hidden sm:inline">Bersihkan Log</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleExportCSV}
@@ -1064,6 +1087,175 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
         }}
         onCancel={() => setLoanToDelete(null)}
       />
+
+      {/* MODAL: Bersihkan Log Riwayat Peminjaman (Requirement 9) */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-rose-400" />
+                <h3 className="font-bold text-sm">Bersihkan Riwayat Peminjaman</h3>
+              </div>
+              <button
+                onClick={() => setIsClearModalOpen(false)}
+                className="text-white/70 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600">
+                Pilih periode atau kategori catatan peminjaman yang ingin Anda bersihkan dari riwayat:
+              </p>
+
+              <div className="space-y-2">
+                <label 
+                  onClick={() => setClearScope('OLDER_3_MONTHS')}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                    clearScope === 'OLDER_3_MONTHS'
+                      ? 'border-[#1B5E20] bg-[#E8F5E9] font-bold text-[#1B5E20] ring-1 ring-[#1B5E20]'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="radio" 
+                      name="clearLoanScope" 
+                      checked={clearScope === 'OLDER_3_MONTHS'} 
+                      onChange={() => setClearScope('OLDER_3_MONTHS')}
+                      className="text-[#1B5E20]"
+                    />
+                    <div>
+                      <div>Lebih dari 3 Bulan Lalu</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Hapus arsip peminjaman yang berusia &gt; 90 hari</div>
+                    </div>
+                  </div>
+                </label>
+
+                <label 
+                  onClick={() => setClearScope('OLDER_1_MONTH')}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                    clearScope === 'OLDER_1_MONTH'
+                      ? 'border-[#1B5E20] bg-[#E8F5E9] font-bold text-[#1B5E20] ring-1 ring-[#1B5E20]'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="radio" 
+                      name="clearLoanScope" 
+                      checked={clearScope === 'OLDER_1_MONTH'} 
+                      onChange={() => setClearScope('OLDER_1_MONTH')}
+                      className="text-[#1B5E20]"
+                    />
+                    <div>
+                      <div>Lebih dari 1 Bulan Lalu</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Hapus arsip peminjaman yang berusia &gt; 30 hari</div>
+                    </div>
+                  </div>
+                </label>
+
+                <label 
+                  onClick={() => setClearScope('OLDER_7_DAYS')}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                    clearScope === 'OLDER_7_DAYS'
+                      ? 'border-[#1B5E20] bg-[#E8F5E9] font-bold text-[#1B5E20] ring-1 ring-[#1B5E20]'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="radio" 
+                      name="clearLoanScope" 
+                      checked={clearScope === 'OLDER_7_DAYS'} 
+                      onChange={() => setClearScope('OLDER_7_DAYS')}
+                      className="text-[#1B5E20]"
+                    />
+                    <div>
+                      <div>Lebih dari 7 Hari Lalu</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Hapus arsip peminjaman yang berusia &gt; 7 hari</div>
+                    </div>
+                  </div>
+                </label>
+
+                <label 
+                  onClick={() => setClearScope('RETURNED')}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                    clearScope === 'RETURNED'
+                      ? 'border-amber-500 bg-amber-50 font-bold text-amber-900 ring-1 ring-amber-500'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="radio" 
+                      name="clearLoanScope" 
+                      checked={clearScope === 'RETURNED'} 
+                      onChange={() => setClearScope('RETURNED')}
+                      className="text-amber-600"
+                    />
+                    <div>
+                      <div>Hanya yang Sudah Selesai / Dikembalikan</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Pertahankan yang masih dipinjam (aktif)</div>
+                    </div>
+                  </div>
+                </label>
+
+                <label 
+                  onClick={() => setClearScope('ALL')}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                    clearScope === 'ALL'
+                      ? 'border-rose-500 bg-rose-50 font-bold text-rose-900 ring-1 ring-rose-500'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="radio" 
+                      name="clearLoanScope" 
+                      checked={clearScope === 'ALL'} 
+                      onChange={() => setClearScope('ALL')}
+                      className="text-rose-600"
+                    />
+                    <div>
+                      <div>Hapus Semua Riwayat Peminjaman</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Hapus total seluruh catatan peminjaman</div>
+                    </div>
+                  </div>
+                  <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
+                    {loans.length} total
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsClearModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearLoans) {
+                    onClearLoans({ scope: clearScope });
+                  }
+                  setIsClearModalOpen(false);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bersihkan Riwayat Peminjaman</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

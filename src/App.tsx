@@ -92,7 +92,7 @@ import {
   getPageBackground 
 } from './utils/themeStyles';
 
-const STORAGE_KEY_ITEMS = 'ga_warehouse_items_v8';
+const STORAGE_KEY_ITEMS = 'ga_warehouse_items_v11';
 const STORAGE_KEY_TRANSACTIONS = 'ga_warehouse_transactions_v8';
 const STORAGE_KEY_EMPLOYEES = 'ga_warehouse_employees_v8';
 const STORAGE_KEY_USERS = 'ga_warehouse_users_v8';
@@ -117,7 +117,7 @@ export default function App() {
 
   // Helper to normalize and ensure rack location is clean Gudang GA or Gudang Kayu
   const sanitizeItemsList = (list: any[]): Item[] => {
-    if (!Array.isArray(list)) return INITIAL_ITEMS;
+    if (!Array.isArray(list) || list.length === 0) return INITIAL_ITEMS;
     return list.map((item) => ({
       ...item,
       rackLocation: item.rackLocation && item.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA',
@@ -127,7 +127,7 @@ export default function App() {
   // 1. Core items database
   const [items, setItems] = useState<Item[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_ITEMS) || localStorage.getItem('ga_warehouse_items_v6');
+      const saved = localStorage.getItem(STORAGE_KEY_ITEMS);
       return saved ? sanitizeItemsList(JSON.parse(saved)) : sanitizeItemsList(INITIAL_ITEMS);
     } catch {
       return sanitizeItemsList(INITIAL_ITEMS);
@@ -872,6 +872,19 @@ export default function App() {
     showToast('Seluruh data master barang telah dihapus bersih dari database.', 'warning');
   };
 
+  const handleRestoreDefaultItems = () => {
+    const defaultList = sanitizeItemsList(INITIAL_ITEMS);
+    setItems(defaultList);
+    try {
+      localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(defaultList));
+    } catch (e) {
+      console.error(e);
+    }
+    syncToCloud({ items: defaultList });
+    logAudit('Muat Ulang Data Standar', 'STOCK', `Memulihkan ${defaultList.length} data master barang standar operasional`);
+    showToast(`Berhasil memuat ulang ${defaultList.length} data master barang standar ke sistem & Cloud!`, 'success');
+  };
+
   // Transaction submission (IN & OUT) with instant Cloud broadcast
   const handleSubmitTransaction = (newTrx: Transaction) => {
     const nowIso = new Date().toISOString();
@@ -1076,21 +1089,103 @@ export default function App() {
     );
   };
 
-  const handleClearTransactions = (type: 'ALL' | 'IN' | 'OUT' = 'ALL') => {
-    let nextTrx: Transaction[];
-    if (type === 'ALL') {
-      nextTrx = [];
-      setTransactions([]);
-      syncToCloud({ transactions: [] });
-      logAudit('Hapus Semua Riwayat', 'TRANSACTIONS', 'Membersihkan seluruh log riwayat keluar & masuk');
-      showToast('Seluruh riwayat transaksi log telah dikosongkan.', 'warning');
+  const handleClearTransactions = (
+    options: {
+      scope: 'ALL' | 'IN' | 'OUT';
+      period: 'ALL' | '3_MONTHS' | '1_MONTH' | '7_DAYS' | 'CUSTOM';
+      customStart?: string;
+      customEnd?: string;
+    } | ('ALL' | 'IN' | 'OUT') = 'ALL'
+  ) => {
+    const opts = typeof options === 'string' 
+      ? { scope: options, period: 'ALL' as const } 
+      : options;
+
+    const now = new Date();
+    let nextTrx = [...transactions];
+
+    if (opts.period === '3_MONTHS') {
+      const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).getTime();
+      nextTrx = nextTrx.filter((t) => {
+        if (opts.scope !== 'ALL' && t.type !== opts.scope) return true;
+        const tTime = new Date(t.date || t.timestamp || 0).getTime();
+        return tTime >= cutoff; // Keep records younger than cutoff
+      });
+    } else if (opts.period === '1_MONTH') {
+      const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).getTime();
+      nextTrx = nextTrx.filter((t) => {
+        if (opts.scope !== 'ALL' && t.type !== opts.scope) return true;
+        const tTime = new Date(t.date || t.timestamp || 0).getTime();
+        return tTime >= cutoff;
+      });
+    } else if (opts.period === '7_DAYS') {
+      const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).getTime();
+      nextTrx = nextTrx.filter((t) => {
+        if (opts.scope !== 'ALL' && t.type !== opts.scope) return true;
+        const tTime = new Date(t.date || t.timestamp || 0).getTime();
+        return tTime >= cutoff;
+      });
+    } else if (opts.period === 'CUSTOM' && (opts.customStart || opts.customEnd)) {
+      nextTrx = nextTrx.filter((t) => {
+        if (opts.scope !== 'ALL' && t.type !== opts.scope) return true;
+        const d = (t.date || '').slice(0, 10);
+        if (opts.customStart && d >= opts.customStart && (!opts.customEnd || d <= opts.customEnd)) {
+          return false;
+        }
+        return true;
+      });
     } else {
-      nextTrx = transactions.filter((t) => t.type !== type);
-      setTransactions(nextTrx);
-      syncToCloud({ transactions: nextTrx });
-      logAudit('Hapus Riwayat Transaksi', 'TRANSACTIONS', `Membersihkan log riwayat tipe ${type}`);
-      showToast(`Riwayat transaksi barang ${type === 'OUT' ? 'KELUAR' : 'MASUK'} telah dibersihkan.`, 'warning');
+      // ALL period
+      if (opts.scope === 'ALL') {
+        nextTrx = [];
+      } else {
+        nextTrx = nextTrx.filter((t) => t.type !== opts.scope);
+      }
     }
+
+    setTransactions(nextTrx);
+    try {
+      localStorage.setItem(STORAGE_KEY_TRANSACTIONS, JSON.stringify(nextTrx));
+    } catch (e) {
+      console.error(e);
+    }
+    syncToCloud({ transactions: nextTrx });
+    logAudit(
+      'Bersihkan Riwayat Transaksi',
+      'TRANSACTIONS',
+      `Membersihkan log transaksi: ${opts.scope} (Periode: ${opts.period})`
+    );
+    showToast('Riwayat transaksi telah dibersihkan secara permanen.', 'warning');
+  };
+
+  const handleClearLoans = (options: { scope: 'ALL' | 'RETURNED' | 'OLDER_3_MONTHS' | 'OLDER_1_MONTH' | 'OLDER_7_DAYS' }) => {
+    const now = new Date();
+    let nextLoans = [...loans];
+
+    if (options.scope === 'ALL') {
+      nextLoans = [];
+    } else if (options.scope === 'RETURNED') {
+      nextLoans = loans.filter((l) => l.status === 'BORROWED');
+    } else {
+      let days = 90;
+      if (options.scope === 'OLDER_1_MONTH') days = 30;
+      if (options.scope === 'OLDER_7_DAYS') days = 7;
+      const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).getTime();
+      nextLoans = loans.filter((l) => {
+        const tTime = new Date(l.loanDate || l.createdAt || 0).getTime();
+        return tTime >= cutoff;
+      });
+    }
+
+    setLoans(nextLoans);
+    try {
+      localStorage.setItem(STORAGE_KEY_LOANS, JSON.stringify(nextLoans));
+    } catch (e) {
+      console.error(e);
+    }
+    syncToCloud({ loans: nextLoans });
+    logAudit('Bersihkan Riwayat Pinjaman', 'LOANS', `Membersihkan log riwayat pinjaman: scope ${options.scope}`);
+    showToast('Riwayat peminjaman barang telah dibersihkan secara permanen.', 'warning');
   };
 
   // Item Loans operations with immediate Cloud sync
@@ -1521,6 +1616,7 @@ export default function App() {
             onDeleteItem={handleDeleteItem}
             onClearAllStock={handleClearAllStock}
             onDeleteAllStockItems={handleDeleteAllStockItems}
+            onRestoreDefaultItems={handleRestoreDefaultItems}
             onScanItemForRequest={handleDirectItemRequest}
             onOpenPrintSheet={() => {
               setBarcodePrintMode('STOCK');
@@ -1554,6 +1650,7 @@ export default function App() {
             onAddLoan={handleAddLoan}
             onReturnLoan={handleReturnLoan}
             onDeleteLoan={handleDeleteLoan}
+            onClearLoans={handleClearLoans}
           />
         )}
       </main>

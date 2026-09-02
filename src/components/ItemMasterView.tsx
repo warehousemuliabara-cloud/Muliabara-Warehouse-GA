@@ -51,6 +51,7 @@ interface ItemMasterViewProps {
   onDeleteItem: (itemId: string) => void;
   onClearAllStock?: () => void;
   onDeleteAllStockItems?: () => void;
+  onRestoreDefaultItems?: () => void;
   onScanItemForRequest: (item: Item) => void;
   onOpenPrintSheet: () => void;
   onOpenGoogleSheets?: () => void;
@@ -66,6 +67,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
   onDeleteItem,
   onClearAllStock,
   onDeleteAllStockItems,
+  onRestoreDefaultItems,
   onScanItemForRequest,
   onOpenPrintSheet,
   onOpenGoogleSheets,
@@ -97,6 +99,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
   const [isConfirmClearStockOpen, setIsConfirmClearStockOpen] = useState(false);
   const [isConfirmDeleteAllItemsOpen, setIsConfirmDeleteAllItemsOpen] = useState(false);
+  const [isConfirmRestoreDefaultOpen, setIsConfirmRestoreDefaultOpen] = useState(false);
 
   // Modal Add / Edit Item
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -382,14 +385,13 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
           </p>
         </div>
 
-        {/* Action Buttons with Compact Glossy Style */}
-        {/* Action Buttons Toolbar with Standardized Dimensions & Clean Soft Colors */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        {/* Action Buttons Toolbar - Tidy, Standardized & Neatly Arranged */}
+        <div className="flex flex-wrap items-center gap-2">
           {canReset && onClearAllStock && (
             <button
               type="button"
               onClick={() => setIsConfirmClearStockOpen(true)}
-              className="h-9 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-xl border border-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="h-9 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-xl border border-amber-300 flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
               title="Kosongkan seluruh stok fisik barang menjadi 0"
             >
               <RotateCcw className="w-3.5 h-3.5 text-amber-700 shrink-0" />
@@ -401,11 +403,23 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
             <button
               type="button"
               onClick={() => setIsConfirmDeleteAllItemsOpen(true)}
-              className="h-9 px-3 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-xl border border-rose-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="h-9 px-3 bg-rose-50 hover:bg-rose-100 text-rose-800 text-xs font-bold rounded-xl border border-rose-300 flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
               title="Hapus seluruh database master barang"
             >
               <ShieldAlert className="w-3.5 h-3.5 text-rose-700 shrink-0" />
               <span>Hapus Semua</span>
+            </button>
+          )}
+
+          {onRestoreDefaultItems && (currentUser.role === 'MASTER_ADMIN' || currentUser.role === 'ADMIN') && (
+            <button
+              type="button"
+              onClick={() => setIsConfirmRestoreDefaultOpen(true)}
+              className="h-9 px-3 bg-sky-50 hover:bg-sky-100 text-sky-900 text-xs font-bold rounded-xl border border-sky-300 flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+              title="Muat ulang seluruh 175 Master Barang standar operasional"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+              <span>Muat Master (175)</span>
             </button>
           )}
 
@@ -416,11 +430,12 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                   href={connectedConfig.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="h-9 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1 transition-all shadow-2xs"
+                  className="h-9 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 flex items-center gap-1.5 transition-all shadow-2xs"
                   title={`Buka Google Sheet: ${connectedConfig.title}`}
                 >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span>Buka Sheet</span>
-                  <ArrowUpRight className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <ArrowUpRight className="w-3 h-3 text-emerald-600 shrink-0 ml-0.5" />
                 </a>
               )}
 
@@ -428,7 +443,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                 type="button"
                 onClick={handleQuickSyncStock}
                 disabled={isSyncingStockGSheet}
-                className="h-9 px-3 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl border border-emerald-500/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                className="h-9 px-3 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl border border-emerald-600/60 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
                 title="Sinkronkan seluruh data stok ke Google Sheets sekarang"
               >
                 {isSyncingStockGSheet ? (
@@ -443,17 +458,18 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                 <button
                   type="button"
                   onClick={onOpenGoogleSheets}
-                  className="h-9 px-3 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-600/50 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  className="h-9 px-3 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl border border-emerald-700/60 flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
                   title="Buka panel Integrasi Google Sheets lengkap"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
                   <span>Google Sheets</span>
                 </button>
               )}
+
               <button
                 type="button"
                 onClick={() => setIsImportModalOpen(true)}
-                className="h-9 px-3 bg-[#E8F5E9] hover:bg-[#A5D6A7] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                className="h-9 px-3.5 bg-[#E8F5E9] hover:bg-[#C8E6C9] text-[#1B5E20] text-xs font-bold rounded-xl border border-[#A5D6A7] flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-[#1B5E20] shrink-0" />
                 <span>Excel / CSV</span>
@@ -461,22 +477,11 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
             </>
           )}
 
-          {canPrint && (
-            <button
-              type="button"
-              onClick={onOpenPrintSheet}
-              className="h-9 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-              <span>Cetak Label</span>
-            </button>
-          )}
-
           {canAdd && (
             <button
               type="button"
               onClick={openAddModal}
-              className="h-9 px-4 bg-[#1B5E20] hover:bg-[#66BB6A] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              className="h-9 px-4 bg-[#1B5E20] hover:bg-[#2E7D32] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
             >
               <PlusCircle className="w-4 h-4 text-[#A5D6A7] shrink-0" />
               <span>Tambah Barang Baru</span>
@@ -670,40 +675,27 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                 </div>
 
                 {/* Action Buttons Row with RBAC */}
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                  {canPrint ? (
+                <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-slate-100">
+                  {canEdit && (
                     <button
                       type="button"
-                      onClick={() => setItemToPrint(item)}
-                      className="text-[11px] font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer"
+                      onClick={() => openEditModal(item)}
+                      className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                      title="Edit Data Barang"
                     >
-                      <Printer className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Cetak Label</span>
+                      <Edit3 className="w-3.5 h-3.5" />
                     </button>
-                  ) : <div />}
-
-                  <div className="flex items-center gap-1.5">
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(item)}
-                        className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
-                        title="Edit Data Barang"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    {canDelete && (
-                      <button
-                        type="button"
-                        onClick={() => setItemToDelete(item)}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer"
-                        title="Hapus Barang"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
+                  )}
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => setItemToDelete(item)}
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer"
+                      title="Hapus Barang"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -752,14 +744,6 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                         <span className="font-mono font-bold text-[11px] bg-slate-100 text-[#1B5E20] px-1.5 py-0.5 rounded border border-slate-200">
                           {item.code}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setItemToPrint(item)}
-                          title="Cetak Label Barcode"
-                          className="p-1 text-slate-400 hover:text-[#1B5E20] hover:bg-emerald-50 rounded transition-colors cursor-pointer"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     </td>
 
@@ -1210,6 +1194,22 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
           setIsConfirmDeleteAllItemsOpen(false);
         }}
         onCancel={() => setIsConfirmDeleteAllItemsOpen(false)}
+      />
+
+      {/* Restore Default 175 Master Stock Items Modal */}
+      <ConfirmationModal
+        isOpen={isConfirmRestoreDefaultOpen}
+        title="Muat Ulang 175 Master Data Barang"
+        message="Tindakan ini akan memuat ulang seluruh 175 master data barang standar operasional gudang dan menyinkronkannya ke Cloud. Lanjutkan?"
+        confirmText="Ya, Muat Ulang 175 Master Barang"
+        isDestructive={false}
+        onConfirm={() => {
+          if (onRestoreDefaultItems) {
+            onRestoreDefaultItems();
+          }
+          setIsConfirmRestoreDefaultOpen(false);
+        }}
+        onCancel={() => setIsConfirmRestoreDefaultOpen(false)}
       />
     </div>
   );
