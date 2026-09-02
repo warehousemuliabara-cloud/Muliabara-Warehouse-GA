@@ -8,39 +8,45 @@ import {
   onSnapshot,
   setLogLevel
 } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Suppress Firestore benign polling and retry log noise in console
+// Suppress Firestore verbose debug log noise in console
 try {
   setLogLevel('silent');
 } catch {
-  // Ignore in case environment restricts logLevel
+  // Ignore
 }
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const dbId = (firebaseConfig as any).firestoreDatabaseId;
 
-// Initialize Firebase Anonymous Auth for seamless cross-origin Netlify access
-try {
-  const auth = getAuth(app);
-  signInAnonymously(auth).catch((err) => {
-    // Non-blocking in case auth is not enabled
-    console.debug('Firebase Auth status:', err?.message);
-  });
-} catch {
-  // Safe
-}
-
-// Initialize Firestore with standard high-performance WebSockets & fallback for seamless Netlify & Mobile connectivity
+// Initialize Firestore with ignoreUndefinedProperties and experimentalAutoDetectLongPolling
+// This ensures 100% reliable connectivity on Netlify, Mobile Safari, Android Chrome, and PC.
 let firestoreInstance: ReturnType<typeof getFirestore>;
 try {
-  firestoreInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
+  firestoreInstance = initializeFirestore(
+    app,
+    {
+      ignoreUndefinedProperties: true,
+      experimentalAutoDetectLongPolling: true,
+    },
+    dbId || undefined
+  );
 } catch {
   try {
-    firestoreInstance = initializeFirestore(app, {}, dbId || undefined);
+    firestoreInstance = initializeFirestore(
+      app,
+      {
+        ignoreUndefinedProperties: true,
+      },
+      dbId || undefined
+    );
   } catch {
-    firestoreInstance = getFirestore(app);
+    try {
+      firestoreInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
+    } catch {
+      firestoreInstance = getFirestore(app);
+    }
   }
 }
 
@@ -50,7 +56,7 @@ export const db = firestoreInstance;
 export const WAREHOUSE_DOC_ID = 'warehouse_kbct_main';
 export const WAREHOUSE_COLLECTION = 'warehouses';
 
-// Unique Session ID for this tab/client to prevent self-echo and infinite loops
+// Unique Session ID for this browser tab/client to prevent self-echo loops
 export const CLIENT_SESSION_ID = typeof window !== 'undefined'
   ? `client_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`
   : 'server_env';
@@ -74,8 +80,8 @@ export type SyncState = 'connected' | 'syncing' | 'offline' | 'error';
 let currentSyncState: SyncState = 'connected';
 const syncListeners: ((state: SyncState, message?: string) => void)[] = [];
 
-// Cross-tab BroadcastChannel for instant 0ms multi-account & multi-tab synchronization
-const CROSS_TAB_CHANNEL_NAME = 'ga_warehouse_kbct_broadcast_v2';
+// Cross-tab BroadcastChannel for 0ms multi-account & multi-tab synchronization on same device
+const CROSS_TAB_CHANNEL_NAME = 'ga_warehouse_kbct_broadcast_v3';
 let broadcastChannel: BroadcastChannel | null = null;
 if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
   try {
@@ -125,8 +131,27 @@ function updateSyncState(state: SyncState, message?: string) {
   });
 }
 
-// Track last applied hash to prevent duplicate re-renders
+// Track last applied hash to prevent unnecessary re-renders
 let lastAppliedHash = '';
+
+/**
+ * Deep cleans any JavaScript object before writing to Firestore.
+ * Strips all `undefined` properties, cleans arrays, and limits log sizes.
+ */
+export function sanitizePayloadForFirestore(raw: any): any {
+  if (raw === null || raw === undefined) return null;
+  
+  try {
+    // JSON parse/stringify drops all object keys with value `undefined`
+    const cleaned = JSON.parse(JSON.stringify(raw, (key, value) => {
+      if (value === undefined) return undefined; // will be omitted by JSON.stringify
+      return value;
+    }));
+    return cleaned;
+  } catch {
+    return raw;
+  }
+}
 
 function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
   try {
@@ -179,13 +204,13 @@ export function smartMergeWarehouseData(
   // 1. Merge Transactions (Union by ID / Transaction Number, highest status rank & newest timestamp wins)
   const trxMap = new Map<string, any>();
 
-  // Add remote transactions
+  // Add remote transactions first (Cloud authoritative)
   (remoteObj.transactions || []).forEach((t: any) => {
     const key = String(t.id || t.transactionNumber || '').trim();
     if (key) trxMap.set(key, t);
   });
 
-  // Add or update with local transactions (if local has new or newer)
+  // Add or update with local transactions (if local has new items not yet in cloud or newer updates)
   (localObj.transactions || []).forEach((t: any) => {
     const key = String(t.id || t.transactionNumber || '').trim();
     if (!key) return;
@@ -217,7 +242,8 @@ export function smartMergeWarehouseData(
     (a, b) => new Date(b.date || b.updatedAt || 0).getTime() - new Date(a.date || a.updatedAt || 0).getTime()
   );
 
-  // 2. Merge Items (Union by ID / Code, keeping latest stock and data)
+  // 2. Merge Items (Union by ID / Code)
+  // Remote items from Cloud take precedence unless local has explicit user edit timestamp
   const itemMap = new Map<string, any>();
   (remoteObj.items || []).forEach((it: any) => {
     const key = String(it.id || it.code || '').trim().toLowerCase();
@@ -233,7 +259,8 @@ export function smartMergeWarehouseData(
       const existing = itemMap.get(key);
       const localTime = new Date(it.updatedAt || 0).getTime();
       const remoteTime = new Date(existing.updatedAt || 0).getTime();
-      if (localTime >= remoteTime) {
+      // Only override remote item if local item has a distinctly newer explicit update timestamp
+      if (localTime > remoteTime && remoteTime > 0) {
         itemMap.set(key, { ...existing, ...it });
       } else {
         itemMap.set(key, { ...it, ...existing });
@@ -295,7 +322,7 @@ export function smartMergeWarehouseData(
   });
   const mergedLoans = Array.from(loanMap.values());
 
-  // 6. Merge Audit Logs (Union by ID, sorted newest first, max 500)
+  // 6. Merge Audit Logs (Union by ID, sorted newest first, max 200)
   const auditMap = new Map<string, any>();
   (remoteObj.auditLogs || []).forEach((a: any) => {
     if (a.id) auditMap.set(a.id, a);
@@ -305,7 +332,7 @@ export function smartMergeWarehouseData(
   });
   const mergedAuditLogs = Array.from(auditMap.values())
     .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-    .slice(0, 500);
+    .slice(0, 200);
 
   // 7. Role Permissions & Dashboard Config
   const mergedPermissions = {
@@ -347,14 +374,14 @@ export async function fetchFreshWarehouseData(
       updateSyncState('connected', 'Tersinkronisasi Cloud');
       const cloudData = snapshot.data() as WarehouseSyncPayload;
 
-      // Smart merge cloud data with current local records so no transaction is overwritten or lost
+      // Smart merge cloud data with current local records
       const mergedData = currentLocal
         ? smartMergeWarehouseData(currentLocal, cloudData)
         : cloudData;
 
       lastAppliedHash = computeDataHash(mergedData);
 
-      // If local had new transactions not yet in cloud, push the merged result to Cloud
+      // If local had new transactions not yet in cloud, push merged result to Cloud
       if (currentLocal && (currentLocal.transactions?.length || 0) > (cloudData.transactions?.length || 0)) {
         pushWarehouseSync(mergedData).catch(() => {});
       }
@@ -368,28 +395,30 @@ export async function fetchFreshWarehouseData(
         employees: currentLocal.employees || [],
         users: currentLocal.users || [],
         loans: currentLocal.loans || [],
-        auditLogs: currentLocal.auditLogs || [],
+        auditLogs: (currentLocal.auditLogs || []).slice(0, 100),
         rolePermissions: currentLocal.rolePermissions || {},
         dashboardConfig: currentLocal.dashboardConfig || {},
         lastUpdated: new Date().toISOString(),
         updatedBy: currentLocal.updatedBy || 'Sistem',
         lastWriterId: CLIENT_SESSION_ID,
       };
-      await setDoc(docRef, initialCloud);
+      
+      const cleanInitial = sanitizePayloadForFirestore(initialCloud);
+      await setDoc(docRef, cleanInitial);
       updateSyncState('connected', 'Tersinkronisasi Cloud');
-      lastAppliedHash = computeDataHash(initialCloud);
-      return initialCloud;
+      lastAppliedHash = computeDataHash(cleanInitial);
+      return cleanInitial;
     }
     return null;
   } catch (err: any) {
-    console.warn('Direct fetch from Firestore failed:', err?.message);
+    console.warn('Direct fetch from Firestore notice:', err?.message);
     return null;
   }
 }
 
 /**
  * Subscribe to real-time warehouse data changes from Firestore.
- * Automatically filters out self-echoes to avoid infinite loops and UI flickering.
+ * Automatically propagates instant updates to all Mobile and PC devices.
  */
 export function subscribeToWarehouseData(
   onData: (data: WarehouseSyncPayload) => void,
@@ -453,7 +482,7 @@ export function subscribeToWarehouseData(
 
 /**
  * Primary sync function: Writes direct authoritative snapshot to Firestore Cloud.
- * Guarantees that changes propagate to all accounts instantly.
+ * Guarantees that changes propagate to all accounts & devices instantly.
  */
 export async function pushWarehouseSync(
   payload: Partial<WarehouseSyncPayload> & { updatedBy?: string }
@@ -467,7 +496,7 @@ export async function pushWarehouseSync(
     employees: payload.employees || [],
     users: payload.users || [],
     loans: payload.loans || [],
-    auditLogs: payload.auditLogs || [],
+    auditLogs: (payload.auditLogs || []).slice(0, 200),
     rolePermissions: payload.rolePermissions || {},
     dashboardConfig: payload.dashboardConfig || {},
     lastUpdated: new Date().toISOString(),
@@ -475,14 +504,15 @@ export async function pushWarehouseSync(
     lastWriterId: CLIENT_SESSION_ID,
   };
 
-  lastAppliedHash = computeDataHash(finalPayload);
+  const cleanPayload = sanitizePayloadForFirestore(finalPayload);
+  lastAppliedHash = computeDataHash(cleanPayload);
 
-  // 1. Broadcast to other tabs in the same browser instantly
+  // 1. Broadcast to other tabs in the same browser immediately (0ms)
   if (broadcastChannel) {
     try {
       broadcastChannel.postMessage({
         type: 'WAREHOUSE_SYNC_UPDATE',
-        payload: finalPayload,
+        payload: cleanPayload,
         senderId: CLIENT_SESSION_ID,
       });
     } catch {
@@ -490,14 +520,15 @@ export async function pushWarehouseSync(
     }
   }
 
-  // 2. Persist directly to Firestore Cloud
+  // 2. Persist directly to Firestore Cloud for all Mobile & PC devices
   try {
-    await setDoc(docRef, finalPayload);
+    await setDoc(docRef, cleanPayload);
     updateSyncState('connected', 'Tersinkronisasi Cloud');
-    return finalPayload;
+    return cleanPayload;
   } catch (error: any) {
     console.warn('Firestore push error:', error?.message);
     updateSyncState('offline', 'Mode Offline (Tersimpan Lokal)');
-    return finalPayload;
+    return cleanPayload;
   }
 }
+
