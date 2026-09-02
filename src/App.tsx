@@ -208,13 +208,13 @@ export default function App() {
     }
   });
 
-  // Login & Session state (Requirement 4: LoginView entry point)
+  // Login & Session state (Ensures Login screen opens first when deployed to Netlify / on first open)
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('ga_warehouse_is_logged_in');
-      return saved !== null ? saved === 'true' : true;
+      return saved === 'true'; // strictly false on first load or after logout
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -262,7 +262,11 @@ export default function App() {
 
   const handleLogout = () => {
     setIsLoggedIn(false);
-    localStorage.setItem('ga_warehouse_is_logged_in', 'false');
+    try {
+      localStorage.setItem('ga_warehouse_is_logged_in', 'false');
+      localStorage.removeItem(STORAGE_KEY_CURRENT_USER);
+    } catch {}
+    showToast('Anda telah berhasil keluar dari sistem.', 'info');
   };
 
   // Active navigation tab with persistence so inspections never get lost/reset

@@ -32,13 +32,13 @@ try {
   // Safe
 }
 
-// Initialize Firestore with robust Long-Polling (ensures reliable connection across mobile networks & Netlify)
+// Initialize Firestore with robust auto-detect long polling and WebSocket support (ensures reliable connection across mobile networks & Netlify)
 let firestoreInstance: ReturnType<typeof getFirestore>;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
     },
     dbId || undefined
   );
