@@ -32,18 +32,16 @@ try {
   // Safe
 }
 
-// Initialize Firestore with robust auto-detect long polling and WebSocket support (ensures reliable connection across mobile networks & Netlify)
+// Initialize Firestore with standard high-performance WebSockets & fallback for seamless Netlify & Mobile connectivity
 let firestoreInstance: ReturnType<typeof getFirestore>;
 try {
-  firestoreInstance = initializeFirestore(
-    app,
-    {
-      experimentalAutoDetectLongPolling: true,
-    },
-    dbId || undefined
-  );
-} catch {
   firestoreInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
+} catch {
+  try {
+    firestoreInstance = initializeFirestore(app, {}, dbId || undefined);
+  } catch {
+    firestoreInstance = getFirestore(app);
+  }
 }
 
 export const db = firestoreInstance;
@@ -133,17 +131,15 @@ let lastAppliedHash = '';
 function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
   try {
     const txSummary = (data.transactions || [])
-      .slice(0, 20)
-      .map((t) => `${t.id || t.transactionNumber}:${t.status}:${t.updatedAt || t.date || ''}`)
+      .map((t) => `${t.id || t.transactionNumber}:${t.status}:${t.updatedAt || t.date || ''}:${t.dispatchedAt || ''}`)
       .join('|');
     const itemStockSum = (data.items || []).reduce((acc, i) => acc + (Number(i.currentStock) || 0), 0);
     const itemSummary = (data.items || [])
-      .slice(0, 15)
-      .map((i) => `${i.id || i.code}:${i.currentStock}`)
+      .map((i) => `${i.id || i.code}:${i.currentStock}:${i.updatedAt || ''}`)
       .join('|');
     const empCount = (data.employees || []).length;
     const userCount = (data.users || []).length;
-    const loanSummary = (data.loans || []).map((l) => `${l.id}:${l.status}`).join('|');
+    const loanSummary = (data.loans || []).map((l) => `${l.id}:${l.status}:${l.actualReturnDate || l.borrowDate || ''}`).join('|');
     const rolePermsKey = JSON.stringify(data.rolePermissions || {});
     const cfgKey = JSON.stringify(data.dashboardConfig || {});
     return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
@@ -151,6 +147,22 @@ function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
     return String(Date.now());
   }
 }
+
+const getTrxRank = (t: any): number => {
+  if (!t) return 0;
+  if (t.status === 'COMPLETED') return 40;
+  if (t.status === 'APPROVED') return 30;
+  if (t.status === 'REJECTED') return 20;
+  if (t.status === 'PENDING') return 10;
+  return 5;
+};
+
+const getLoanRank = (l: any): number => {
+  if (!l) return 0;
+  if (l.status === 'RETURNED') return 20;
+  if (l.status === 'BORROWED') return 10;
+  return 5;
+};
 
 /**
  * Robust Bidirectional Smart Merger:
@@ -164,7 +176,7 @@ export function smartMergeWarehouseData(
   const localObj = local || {};
   const remoteObj = remote || {};
 
-  // 1. Merge Transactions (Union by ID / Transaction Number, newest status wins)
+  // 1. Merge Transactions (Union by ID / Transaction Number, highest status rank & newest timestamp wins)
   const trxMap = new Map<string, any>();
 
   // Add remote transactions
@@ -182,14 +194,21 @@ export function smartMergeWarehouseData(
       trxMap.set(key, t);
     } else {
       const existing = trxMap.get(key);
-      const localTime = new Date(t.updatedAt || t.date || 0).getTime();
-      const remoteTime = new Date(existing.updatedAt || existing.date || 0).getTime();
+      const localRank = getTrxRank(t);
+      const remoteRank = getTrxRank(existing);
 
-      // If local is newer or has updated status, keep local
-      if (localTime >= remoteTime) {
+      if (localRank > remoteRank) {
         trxMap.set(key, { ...existing, ...t });
-      } else {
+      } else if (remoteRank > localRank) {
         trxMap.set(key, { ...t, ...existing });
+      } else {
+        const localTime = new Date(t.updatedAt || t.date || 0).getTime();
+        const remoteTime = new Date(existing.updatedAt || existing.date || 0).getTime();
+        if (localTime >= remoteTime) {
+          trxMap.set(key, { ...existing, ...t });
+        } else {
+          trxMap.set(key, { ...t, ...existing });
+        }
       }
     }
   });
@@ -247,7 +266,7 @@ export function smartMergeWarehouseData(
   });
   const mergedUsers = Array.from(userMap.values());
 
-  // 5. Merge Loans (Union by ID)
+  // 5. Merge Loans (Union by ID, highest rank and latest return date wins)
   const loanMap = new Map<string, any>();
   (remoteObj.loans || []).forEach((l: any) => {
     if (l.id) loanMap.set(l.id, l);
@@ -258,9 +277,19 @@ export function smartMergeWarehouseData(
         loanMap.set(l.id, l);
       } else {
         const existing = loanMap.get(l.id);
-        const localTime = new Date(l.borrowDate || 0).getTime();
-        const remoteTime = new Date(existing.borrowDate || 0).getTime();
-        if (localTime >= remoteTime) loanMap.set(l.id, { ...existing, ...l });
+        const localRank = getLoanRank(l);
+        const remoteRank = getLoanRank(existing);
+
+        if (localRank > remoteRank) {
+          loanMap.set(l.id, { ...existing, ...l });
+        } else if (remoteRank > localRank) {
+          loanMap.set(l.id, { ...l, ...existing });
+        } else {
+          const localTime = new Date(l.updatedAt || l.actualReturnDate || l.borrowDate || 0).getTime();
+          const remoteTime = new Date(existing.updatedAt || existing.actualReturnDate || existing.borrowDate || 0).getTime();
+          if (localTime >= remoteTime) loanMap.set(l.id, { ...existing, ...l });
+          else loanMap.set(l.id, { ...l, ...existing });
+        }
       }
     }
   });

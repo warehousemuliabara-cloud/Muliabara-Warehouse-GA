@@ -597,10 +597,10 @@ export default function App() {
     }
   }, [rolePermissions]);
 
-  // Handle Mobile / Cross-Device Reconnect & Screen Wake
+  // Handle Mobile / Cross-Device Reconnect & Active Heartbeat Sync
   useEffect(() => {
-    const handleVisibilityOrOnline = () => {
-      if (document.visibilityState === 'visible' || navigator.onLine) {
+    const triggerSyncRefresh = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         const current = latestStateRef.current;
         fetchFreshWarehouseData({
           items: current.items,
@@ -626,14 +626,18 @@ export default function App() {
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityOrOnline);
-    window.addEventListener('online', handleVisibilityOrOnline);
-    window.addEventListener('focus', handleVisibilityOrOnline);
+    document.addEventListener('visibilitychange', triggerSyncRefresh);
+    window.addEventListener('online', triggerSyncRefresh);
+    window.addEventListener('focus', triggerSyncRefresh);
+
+    // Active heartbeat every 4 seconds for instantaneous multi-device background update
+    const heartbeatInterval = setInterval(triggerSyncRefresh, 4000);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityOrOnline);
-      window.removeEventListener('online', handleVisibilityOrOnline);
-      window.removeEventListener('focus', handleVisibilityOrOnline);
+      document.removeEventListener('visibilitychange', triggerSyncRefresh);
+      window.removeEventListener('online', triggerSyncRefresh);
+      window.removeEventListener('focus', triggerSyncRefresh);
+      clearInterval(heartbeatInterval);
     };
   }, []);
 
@@ -870,17 +874,22 @@ export default function App() {
 
   // Transaction submission (IN & OUT) with instant Cloud broadcast
   const handleSubmitTransaction = (newTrx: Transaction) => {
+    const nowIso = new Date().toISOString();
     // If autoApproveRequests is active in dashboardConfig, automatically approve OUT requests
-    let finalTrx = { ...newTrx };
+    let finalTrx = { 
+      ...newTrx,
+      updatedAt: nowIso,
+    };
     if (newTrx.type === 'OUT' && dashboardConfig.autoApproveRequests && newTrx.status === 'PENDING') {
       finalTrx = {
         ...newTrx,
         status: 'APPROVED',
+        updatedAt: nowIso,
         approvalInfo: {
           status: 'APPROVED',
           approvedBy: 'Sistem (Auto-Approve Aktif)',
           approverRole: 'MASTER_ADMIN',
-          approvedAt: new Date().toISOString(),
+          approvedAt: nowIso,
           notes: 'Disetujui otomatis oleh kebijakan sistem',
         },
       };
@@ -895,10 +904,10 @@ export default function App() {
         if (trxItem) {
           if (finalTrx.type === 'OUT') {
             const newStock = Math.max(0, item.currentStock - trxItem.quantity);
-            return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
+            return { ...item, currentStock: newStock, updatedAt: nowIso };
           } else {
             const newStock = item.currentStock + trxItem.quantity;
-            return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
+            return { ...item, currentStock: newStock, updatedAt: nowIso };
           }
         }
         return item;
@@ -935,16 +944,18 @@ export default function App() {
     const trx = transactions.find(t => t.id === trxId);
     if (!trx) return;
 
+    const nowIso = new Date().toISOString();
     const nextTrx = transactions.map(t => {
       if (t.id === trxId) {
         return {
           ...t,
           status: 'APPROVED',
+          updatedAt: nowIso,
           approvalInfo: {
             status: 'APPROVED',
             approvedBy: currentUser.fullName,
             approverRole: currentUser.role,
-            approvedAt: new Date().toISOString(),
+            approvedAt: nowIso,
             notes
           }
         };
@@ -963,16 +974,18 @@ export default function App() {
     const trx = transactions.find(t => t.id === trxId);
     if (!trx) return;
 
+    const nowIso = new Date().toISOString();
     const nextTrx = transactions.map(t => {
       if (t.id === trxId) {
         return {
           ...t,
           status: 'REJECTED',
+          updatedAt: nowIso,
           approvalInfo: {
             status: 'REJECTED',
             approvedBy: currentUser.fullName,
             approverRole: currentUser.role,
-            approvedAt: new Date().toISOString(),
+            approvedAt: nowIso,
             notes: notes || 'Permintaan ditolak oleh Admin'
           }
         };
@@ -991,12 +1004,13 @@ export default function App() {
     const trx = transactions.find(t => t.id === trxId);
     if (!trx) return;
 
+    const nowIso = new Date().toISOString();
     // Deduct stock upon actual dispatch
     const nextItems = items.map((item) => {
       const trxItem = trx.items.find((i) => i.itemId === item.id);
       if (trxItem) {
         const newStock = Math.max(0, item.currentStock - trxItem.quantity);
-        return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
+        return { ...item, currentStock: newStock, updatedAt: nowIso };
       }
       return item;
     });
@@ -1007,8 +1021,9 @@ export default function App() {
         return {
           ...t,
           status: 'COMPLETED',
+          updatedAt: nowIso,
           dispatchedBy: currentUser.fullName,
-          dispatchedAt: new Date().toISOString(),
+          dispatchedAt: nowIso,
         };
       }
       return t;
@@ -1025,6 +1040,7 @@ export default function App() {
     const trxToDelete = transactions.find((t) => t.id === transactionId);
     if (!trxToDelete) return;
 
+    const nowIso = new Date().toISOString();
     let nextItems = items;
     if (revertStock && trxToDelete.status !== 'REJECTED' && trxToDelete.status !== 'PENDING') {
       nextItems = items.map((item) => {
@@ -1034,13 +1050,13 @@ export default function App() {
             return {
               ...item,
               currentStock: item.currentStock + trxItem.quantity,
-              updatedAt: new Date().toISOString(),
+              updatedAt: nowIso,
             };
           } else {
             return {
               ...item,
               currentStock: Math.max(0, item.currentStock - trxItem.quantity),
-              updatedAt: new Date().toISOString(),
+              updatedAt: nowIso,
             };
           }
         }
@@ -1079,13 +1095,18 @@ export default function App() {
 
   // Item Loans operations with immediate Cloud sync
   const handleAddLoan = (newLoan: ItemLoan) => {
-    const nextLoans = [newLoan, ...loans];
+    const nowIso = new Date().toISOString();
+    const finalLoan: ItemLoan = {
+      ...newLoan,
+      updatedAt: nowIso,
+    };
+    const nextLoans = [finalLoan, ...loans];
     setLoans(nextLoans);
     
     // Deduct stock if active
     const nextItems = items.map((it) =>
       it.id === newLoan.itemId
-        ? { ...it, currentStock: Math.max(0, it.currentStock - newLoan.quantity) }
+        ? { ...it, currentStock: Math.max(0, it.currentStock - newLoan.quantity), updatedAt: nowIso }
         : it
     );
     setItems(nextItems);
@@ -1104,6 +1125,7 @@ export default function App() {
     if (!loan) return;
 
     const returnDateStr = new Date().toISOString().substring(0, 10);
+    const nowIso = new Date().toISOString();
 
     const nextLoans = loans.map((l) =>
       l.id === loanId
@@ -1111,6 +1133,7 @@ export default function App() {
             ...l,
             status: 'RETURNED' as const,
             actualReturnDate: returnDateStr,
+            updatedAt: nowIso,
             receivedReturnBy: currentUser.fullName,
             returnCondition: condition,
             returnNotes: notes,
@@ -1124,7 +1147,7 @@ export default function App() {
     if (condition !== 'HILANG') {
       nextItems = items.map((it) =>
         it.id === loan.itemId
-          ? { ...it, currentStock: it.currentStock + loan.quantity }
+          ? { ...it, currentStock: it.currentStock + loan.quantity, updatedAt: nowIso }
           : it
       );
       setItems(nextItems);
