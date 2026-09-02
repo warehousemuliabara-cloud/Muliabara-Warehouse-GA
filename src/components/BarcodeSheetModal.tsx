@@ -94,7 +94,8 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
   const racks = useMemo(() => {
     const set = new Set<string>();
     items.forEach((i) => {
-      if (i.rackLocation) set.add(i.rackLocation);
+      const loc = i.rackLocation && i.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA';
+      set.add(loc);
     });
     return Array.from(set).sort();
   }, [items]);
@@ -126,7 +127,10 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
     }
 
     if (selectedRack !== 'ALL') {
-      list = list.filter((i) => i.rackLocation === selectedRack);
+      list = list.filter((i) => {
+        const itemLoc = i.rackLocation && i.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA';
+        return itemLoc === selectedRack;
+      });
     }
 
     if (searchQuery.trim()) {
@@ -513,16 +517,16 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
                   ))}
                 </select>
 
-                {/* Rack Filter */}
+                {/* Warehouse Location Filter */}
                 <select
                   value={selectedRack}
                   onChange={(e) => setSelectedRack(e.target.value)}
                   className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 font-semibold text-slate-800 text-xs focus:bg-white focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="ALL">Semua Rak ({racks.length})</option>
+                  <option value="ALL">Semua Lokasi ({racks.length})</option>
                   {racks.map((r) => (
                     <option key={r} value={r}>
-                      Rak {r}
+                      {r}
                     </option>
                   ))}
                 </select>
@@ -597,7 +601,8 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
                     const isChecked = selectedIds.includes(item.id);
                     // Strictly sync with current item master data to ensure rack location is 100% accurate
                     const masterItem = items.find((i) => i.id === item.id || i.code === item.code) || item;
-                    const displayLocation = masterItem.rackLocation?.trim() || item.rackLocation?.trim() || 'Gudang Utama';
+                    const rawLoc = masterItem.rackLocation?.trim() || item.rackLocation?.trim() || 'Gudang GA';
+                    const displayLocation = rawLoc.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA';
 
                     return (
                       <div

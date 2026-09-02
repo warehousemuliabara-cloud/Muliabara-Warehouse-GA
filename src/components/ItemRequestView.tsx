@@ -643,7 +643,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                                 <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5">
                                   <span>{itm.category}</span>
                                   <span>•</span>
-                                  <span>Lokasi: {itm.rackLocation}</span>
+                                  <span>Lokasi: {itm.rackLocation && itm.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA'}</span>
                                 </div>
                               </div>
                               <div className="text-right shrink-0 flex items-center gap-2">

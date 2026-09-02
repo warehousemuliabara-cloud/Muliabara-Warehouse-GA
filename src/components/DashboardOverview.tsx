@@ -36,6 +36,7 @@ import {
 import { Item, Transaction, ItemLoan, UserAccount, DashboardConfig, Employee } from '../types';
 import { CompanyLogo } from './CompanyLogo';
 import { BarcodePrintMode } from './BarcodeSheetModal';
+import { getThemeConfig } from '../utils/themeStyles';
 
 interface DashboardOverviewProps {
   items: Item[];
@@ -82,6 +83,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const inTransactions = transactions.filter((t) => t.type === 'IN');
   const pendingApprovals = transactions.filter((t) => t.status === 'PENDING');
   const activeLoans = loans.filter((l) => l.status === 'BORROWED');
+
+  const theme = getThemeConfig(config?.themeColor);
+  const showCards = config?.showMetricCards || {
+    totalItems: true,
+    outTransactions: true,
+    inTransactions: true,
+    lowStockAlert: true,
+  };
 
   // Chart Period Filter ('THIS_MONTH' | 'LAST_30' | 'ALL' | 'CUSTOM')
   const [chartPeriod, setChartPeriod] = useState<'THIS_MONTH' | 'LAST_30' | 'ALL' | 'CUSTOM'>('THIS_MONTH');
@@ -369,7 +378,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       {/* ========================================================================= */}
       {/* 1. EXECUTIVE HEADER BANNER WITH TIDY ACTION BUTTONS                       */}
       {/* ========================================================================= */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800/80 relative overflow-hidden">
+      <div className={`${theme.bannerGradient || 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900'} text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800/80 relative overflow-hidden transition-all duration-300`}>
         {/* Subtle background glow */}
         <div className="absolute right-0 top-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -617,85 +626,95 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       {/* ========================================================================= */}
       {/* 2. TOP 4 KPI CARDS (COMPACT & SMALLER TYPOGRAPHY AS REQUESTED)            */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-        {/* Card 1: Master Stok */}
-        <div
-          onClick={onNavigateToStock}
-          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-blue-300 transition-all cursor-pointer flex items-center gap-2.5 group"
-        >
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <Package className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Master Stok</p>
-            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{totalItemsCount} SKU</div>
-            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">
-              <TrendingUp className="w-2.5 h-2.5 shrink-0" />
-              <span>↑ 12.8%</span>
-              <span className="text-slate-400 font-normal truncate">• {totalPhysicalStock.toLocaleString()} unit</span>
+      {(showCards.totalItems !== false || showCards.outTransactions !== false || showCards.lowStockAlert !== false || showCards.inTransactions !== false) && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+          {/* Card 1: Master Stok */}
+          {showCards.totalItems !== false && (
+            <div
+              onClick={onNavigateToStock}
+              className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-blue-300 transition-all cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Package className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Master Stok</p>
+                <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{totalItemsCount} SKU</div>
+                <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">
+                  <TrendingUp className="w-2.5 h-2.5 shrink-0" />
+                  <span>↑ 12.8%</span>
+                  <span className="text-slate-400 font-normal truncate">• {totalPhysicalStock.toLocaleString()} unit</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Card 2: Permintaan Keluar */}
-        <div
-          onClick={onNavigateToRequest}
-          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-rose-300 transition-all cursor-pointer flex items-center gap-2.5 group"
-        >
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-rose-50 text-rose-600 border border-rose-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <ArrowUpRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Barang Keluar</p>
-            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{outTransactions.length} Mutasi</div>
-            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-rose-600 font-semibold mt-0.5 truncate">
-              <TrendingDown className="w-2.5 h-2.5 shrink-0" />
-              <span>↓ 8.6%</span>
-              <span className="text-slate-400 font-normal truncate">
-                {pendingApprovals.length > 0 ? `• ${pendingApprovals.length} pending` : '• Serah terima'}
-              </span>
+          {/* Card 2: Permintaan Keluar */}
+          {showCards.outTransactions !== false && (
+            <div
+              onClick={onNavigateToRequest}
+              className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-rose-300 transition-all cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-rose-50 text-rose-600 border border-rose-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <ArrowUpRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Barang Keluar</p>
+                <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{outTransactions.length} Mutasi</div>
+                <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-rose-600 font-semibold mt-0.5 truncate">
+                  <TrendingDown className="w-2.5 h-2.5 shrink-0" />
+                  <span>↓ 8.6%</span>
+                  <span className="text-slate-400 font-normal truncate">
+                    {pendingApprovals.length > 0 ? `• ${pendingApprovals.length} pending` : '• Serah terima'}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Card 3: Peminjaman Alat / Tim */}
-        <div
-          onClick={onNavigateToLoans}
-          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-purple-300 transition-all cursor-pointer flex items-center gap-2.5 group"
-        >
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <HandHelping className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Peminjaman Alat</p>
-            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{activeLoans.length} Dipinjam</div>
-            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-purple-600 font-semibold mt-0.5 truncate">
-              <TrendingUp className="w-2.5 h-2.5 shrink-0" />
-              <span>↑ 6.3%</span>
-              <span className="text-slate-400 font-normal truncate">• Toolkit aktif</span>
+          {/* Card 3: Peminjaman Alat / Tim */}
+          {showCards.lowStockAlert !== false && (
+            <div
+              onClick={onNavigateToLoans}
+              className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-purple-300 transition-all cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <HandHelping className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Peminjaman Alat</p>
+                <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{activeLoans.length} Dipinjam</div>
+                <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-purple-600 font-semibold mt-0.5 truncate">
+                  <TrendingUp className="w-2.5 h-2.5 shrink-0" />
+                  <span>↑ 6.3%</span>
+                  <span className="text-slate-400 font-normal truncate">• Toolkit aktif</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Card 4: Penerimaan Barang Masuk */}
-        <div
-          onClick={onNavigateToIncoming}
-          className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-emerald-300 transition-all cursor-pointer flex items-center gap-2.5 group"
-        >
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <ArrowDownLeft className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Penerimaan Masuk</p>
-            <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{inTransactions.length} Inbound</div>
-            <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">
-              <TrendingUp className="w-2.5 h-2.5 shrink-0" />
-              <span>↑ 15.7%</span>
-              <span className="text-slate-400 font-normal truncate">• Restock supplier</span>
+          {/* Card 4: Penerimaan Barang Masuk */}
+          {showCards.inTransactions !== false && (
+            <div
+              onClick={onNavigateToIncoming}
+              className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/80 shadow-2xs hover:shadow-xs hover:border-emerald-300 transition-all cursor-pointer flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <ArrowDownLeft className="w-4 h-4 sm:w-4.5 sm:h-4.5 stroke-[2.5]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase tracking-wider truncate">Penerimaan Masuk</p>
+                <div className="text-xs sm:text-sm font-black text-slate-900 leading-tight truncate">{inTransactions.length} Inbound</div>
+                <div className="flex items-center gap-1 text-[9px] sm:text-[10px] text-emerald-600 font-semibold mt-0.5 truncate">
+                  <TrendingUp className="w-2.5 h-2.5 shrink-0" />
+                  <span>↑ 15.7%</span>
+                  <span className="text-slate-400 font-normal truncate">• Restock supplier</span>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* ========================================================================= */}
       {/* 3. MAIN SECTION: OPERATION OVERVIEW (LEFT) + MULTI-DIMENSIONAL (RIGHT)    */}

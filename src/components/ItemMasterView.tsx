@@ -197,13 +197,17 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
       setFormMinStock(found.minStock !== undefined ? String(found.minStock) : '5');
       setFormDescription(found.description || '');
 
-      const existingInItems = items.find(
-        (i) => i.id === found.id || i.code === found.code || i.name.toLowerCase() === found.name.toLowerCase()
-      );
-      if (existingInItems) {
-        setFormStock(String(existingInItems.currentStock));
+      if (!editingItem) {
+        setFormStock('');
       } else {
-        setFormStock(found.currentStock !== undefined ? String(found.currentStock) : '');
+        const existingInItems = items.find(
+          (i) => i.id === found.id || i.code === found.code || i.name.toLowerCase() === found.name.toLowerCase()
+        );
+        if (existingInItems) {
+          setFormStock(String(existingInItems.currentStock));
+        } else {
+          setFormStock(found.currentStock !== undefined ? String(found.currentStock) : '');
+        }
       }
     }
   };
@@ -518,7 +522,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari nama barang, barcode (GA-ATK-001), rak..."
+              placeholder="Cari nama barang, barcode (GA-ATK-001)..."
               className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#66BB6A]"
             />
           </div>
@@ -633,7 +637,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                     </span>
                     <span className="text-[9px] text-slate-600 bg-amber-50/90 text-amber-900 px-1.5 py-0.5 rounded border border-amber-200/80 flex items-center gap-0.5 truncate font-medium">
                       <MapPin className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                      <span className="truncate">{item.rackLocation || 'Gudang GA'}</span>
+                      <span className="truncate">{item.rackLocation && item.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA'}</span>
                     </span>
                   </div>
 
@@ -778,7 +782,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                     <td className="py-1.5 px-3 text-center">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-medium rounded-md bg-amber-50 text-amber-900 border border-amber-200 whitespace-nowrap">
                         <Building2 className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                        Gudang GA
+                        {item.rackLocation && item.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA'}
                       </span>
                     </td>
 
@@ -1118,7 +1122,7 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                 </p>
                 <h4 className="font-bold text-slate-900 text-sm max-w-xs">{itemToPrint.name}</h4>
                 <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                  Lokasi: <span className="font-bold text-slate-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">{itemToPrint.rackLocation?.trim() || 'Gudang Utama'}</span>
+                  Lokasi: <span className="font-bold text-slate-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">{itemToPrint.rackLocation && itemToPrint.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA'}</span>
                 </p>
                 <div className="my-2.5 py-2 px-3 bg-white rounded-lg border border-slate-200 shadow-xs">
                   <BarcodeRenderer value={itemToPrint.code} width={1.8} height={45} fontSize={12} />

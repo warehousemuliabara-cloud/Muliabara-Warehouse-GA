@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   Palette, 
@@ -16,7 +16,10 @@ import {
   ShieldCheck, 
   Layers,
   LayoutGrid,
-  CheckCircle2
+  CheckCircle2,
+  Sun,
+  Moon,
+  Monitor
 } from 'lucide-react';
 import { DashboardConfig, ThemeColor, FontFamily, DashboardDensity, ThemeMode, UserAccount } from '../types';
 import { DEFAULT_DASHBOARD_CONFIG } from '../data/initialData';
@@ -39,14 +42,14 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
   onSaveConfig,
   onResetConfig,
 }) => {
-  const [themeColor, setThemeColor] = useState<ThemeColor>(config.themeColor);
-  const [fontFamily, setFontFamily] = useState<FontFamily>(config.fontFamily);
-  const [density, setDensity] = useState<DashboardDensity>(config.density);
-  const [mode, setMode] = useState<ThemeMode>(config.mode);
-  const [appName, setAppName] = useState(config.appName);
-  const [companySubtitle, setCompanySubtitle] = useState(config.companySubtitle);
+  const [themeColor, setThemeColor] = useState<ThemeColor>(config.themeColor || 'soft-sky');
+  const [fontFamily, setFontFamily] = useState<FontFamily>(config.fontFamily || 'plus-jakarta');
+  const [density, setDensity] = useState<DashboardDensity>(config.density || 'normal');
+  const [mode, setMode] = useState<ThemeMode>(config.mode || 'light');
+  const [appName, setAppName] = useState(config.appName || 'WAREHOUSE KBCT');
+  const [companySubtitle, setCompanySubtitle] = useState(config.companySubtitle || 'Monitoring & Control System — General Affairs Inventory & Barcode');
   const [logoUrl, setLogoUrl] = useState<string | null>(config.logoUrl);
-  const [reportLocked, setReportLocked] = useState(config.reportLocked);
+  const [reportLocked, setReportLocked] = useState(config.reportLocked || false);
   const [reportLockedPeriod, setReportLockedPeriod] = useState(config.reportLockedPeriod || 'Agustus 2026');
   const [autoApproveRequests, setAutoApproveRequests] = useState(config.autoApproveRequests || false);
   const [showMetricCards, setShowMetricCards] = useState(config.showMetricCards || {
@@ -57,11 +60,33 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
   });
   const [logoInputUrl, setLogoInputUrl] = useState('');
 
+  // Sync state whenever modal opens or external config changes
+  useEffect(() => {
+    if (isOpen) {
+      setThemeColor(config.themeColor || 'soft-sky');
+      setFontFamily(config.fontFamily || 'plus-jakarta');
+      setDensity(config.density || 'normal');
+      setMode(config.mode || 'light');
+      setAppName(config.appName || 'WAREHOUSE KBCT');
+      setCompanySubtitle(config.companySubtitle || 'Monitoring & Control System — General Affairs Inventory & Barcode');
+      setLogoUrl(config.logoUrl || null);
+      setReportLocked(config.reportLocked || false);
+      setReportLockedPeriod(config.reportLockedPeriod || 'Agustus 2026');
+      setAutoApproveRequests(config.autoApproveRequests || false);
+      setShowMetricCards(config.showMetricCards || {
+        totalItems: true,
+        outTransactions: true,
+        inTransactions: true,
+        lowStockAlert: true,
+      });
+    }
+  }, [isOpen, config]);
+
   if (!isOpen) return null;
 
   const isMasterAdmin = currentUser.role === 'MASTER_ADMIN';
 
-  // Rich palette including new modern SOFT colors and classic tones
+  // Rich palette including modern SOFT colors and classic bold tones
   const colorThemes: { id: ThemeColor; name: string; category: 'Soft & Pastel' | 'Klasik & Kontras'; primaryClass: string; bgBadge: string; borderClass: string }[] = [
     // Soft colors
     { id: 'soft-sky', name: 'Soft Sky Blue (KBCT Clean)', category: 'Soft & Pastel', primaryClass: 'bg-sky-700', bgBadge: 'bg-sky-500', borderClass: 'border-sky-300' },
@@ -95,6 +120,12 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
     { id: 'spacious', title: 'Lapang & Luas (Comfortable)', desc: 'Spasi ekstra luas untuk presentasi atau layar monitor besar.' },
   ];
 
+  const modeOptions: { id: ThemeMode; title: string; desc: string; icon: any }[] = [
+    { id: 'light', title: 'Mode Terang (Light)', desc: 'Tampilan bersih, kontras tinggi & nyaman untuk operasional siang.', icon: Sun },
+    { id: 'slate', title: 'Mode Slate Matte', desc: 'Nuansa abu-abu industrial yang teduh dan elegan.', icon: Monitor },
+    { id: 'dark', title: 'Mode Gelap (Dark)', desc: 'Latar gelap modern, hemat daya baterai & ramah mata malam hari.', icon: Moon },
+  ];
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -107,13 +138,6 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
         setLogoUrl(event.target?.result as string);
       };
       reader.readAsDataURL(file);
-    }
-  };
-
-  const handleApplyLogoUrl = () => {
-    if (logoInputUrl.trim()) {
-      setLogoUrl(logoInputUrl.trim());
-      setLogoInputUrl('');
     }
   };
 
@@ -146,7 +170,7 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
             <div>
               <h3 className="font-black text-base text-white">Pengaturan Dashboard & Kustomisasi Tampilan</h3>
               <p className="text-xs text-slate-300 mt-0.5">
-                Atur judul header, tema warna soft/pastel, logo perusahaan, kepadatan frame, dan kontrol sistem
+                Atur judul header, tema warna soft/pastel, logo perusahaan, kepadatan frame, font & kontrol sistem
               </p>
             </div>
           </div>
@@ -221,7 +245,7 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
                 <div className="flex gap-2">
                   <label className="flex-1 px-3 py-2 bg-white border border-slate-300 hover:border-blue-500 rounded-xl text-xs font-semibold text-slate-700 flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors">
                     <Upload className="w-4 h-4 text-blue-600" />
-                    <span>Upload File Logo (PNG/JPG)</span>
+                    <span>Upload File Logo (PNG/JPG/SVG)</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -241,7 +265,7 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
                 <Palette className="w-4 h-4 text-emerald-600" />
                 <span>2. Tema Warna Dashboard (Palet Soft & Klasik)</span>
               </div>
-              <span className="text-[11px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-full">
+              <span className="text-[11px] text-emerald-700 font-bold bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
                 {colorThemes.find((t) => t.id === themeColor)?.name}
               </span>
             </div>
@@ -259,12 +283,13 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
                       onClick={() => setThemeColor(theme.id)}
                       className={`p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-white border-blue-500 shadow-md ring-2 ring-blue-400/40'
+                          ? 'bg-white border-blue-500 shadow-md ring-2 ring-blue-400/40 font-black'
                           : 'bg-white border-slate-200 hover:border-slate-300'
                       }`}
                     >
-                      <div className={`w-4 h-4 rounded-full ${theme.bgBadge} shrink-0`} />
-                      <span className="text-xs font-bold text-slate-800 truncate">{theme.name.replace('Soft ', '')}</span>
+                      <div className={`w-4 h-4 rounded-full ${theme.bgBadge} shrink-0 shadow-xs`} />
+                      <span className="text-xs text-slate-800 truncate">{theme.name.replace('Soft ', '')}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 ml-auto shrink-0" />}
                     </button>
                   );
                 })}
@@ -284,12 +309,13 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
                       onClick={() => setThemeColor(theme.id)}
                       className={`p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-white border-blue-500 shadow-md ring-2 ring-blue-400/40'
+                          ? 'bg-white border-blue-500 shadow-md ring-2 ring-blue-400/40 font-black'
                           : 'bg-white border-slate-200 hover:border-slate-300'
                       }`}
                     >
-                      <div className={`w-4 h-4 rounded-full ${theme.bgBadge} shrink-0`} />
-                      <span className="text-xs font-bold text-slate-800 truncate">{theme.name}</span>
+                      <div className={`w-4 h-4 rounded-full ${theme.bgBadge} shrink-0 shadow-xs`} />
+                      <span className="text-xs text-slate-800 truncate">{theme.name}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 ml-auto shrink-0" />}
                     </button>
                   );
                 })}
@@ -297,11 +323,49 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Kepadatan & Skala Dashboard Frame */}
+          {/* Section 3: Mode Tema Canvas (Light, Slate, Dark) */}
+          <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/90 space-y-4">
+            <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
+              <Sun className="w-4 h-4 text-amber-500" />
+              <span>3. Mode Tampilan Canvas</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {modeOptions.map((opt) => {
+                const Icon = opt.icon;
+                const isSelected = mode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setMode(opt.id)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      isSelected
+                        ? 'bg-white border-blue-500 shadow-md ring-2 ring-blue-400/40'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <Icon className={`w-4 h-4 ${isSelected ? 'text-blue-600' : 'text-slate-500'}`} />
+                          <span className="text-xs font-bold text-slate-900">{opt.title}</span>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-blue-600" />}
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-tight">{opt.desc}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Section 4: Kepadatan & Skala Dashboard Frame */}
           <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/90 space-y-4">
             <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
               <Sliders className="w-4 h-4 text-amber-600" />
-              <span>3. Kepadatan Layout & Ukuran Frame Dashboard</span>
+              <span>4. Kepadatan Layout & Ukuran Frame Dashboard</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -331,11 +395,11 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Section 4: Font & Tipografi */}
+          {/* Section 5: Font & Tipografi */}
           <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/90 space-y-4">
             <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
               <Type className="w-4 h-4 text-purple-600" />
-              <span>4. Pilihan Jenis Font & Tipografi</span>
+              <span>5. Pilihan Jenis Font & Tipografi</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -353,7 +417,9 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
                     }`}
                   >
                     <div>
-                      <span className="text-xs font-bold text-slate-900 block">{f.name}</span>
+                      <span className="text-xs font-bold text-slate-900 block" style={{ fontFamily: f.cssFont }}>
+                        {f.name}
+                      </span>
                       <span className="text-[11px] text-slate-500">{f.preview}</span>
                     </div>
                     {isSelected && <Check className="w-4 h-4 text-purple-600" />}
@@ -363,12 +429,62 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Section 5: Kontrol & Keamanan Laporan (Master Admin Only) */}
+          {/* Section 6: Visibilitas Kartu Metrik KPI */}
+          <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/90 space-y-4">
+            <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
+              <LayoutGrid className="w-4 h-4 text-sky-600" />
+              <span>6. Visibilitas Kartu Metrik Ringkasan (KPI)</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <label className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-300">
+                <span className="text-xs font-bold text-slate-800">Master Stok</span>
+                <input
+                  type="checkbox"
+                  checked={showMetricCards.totalItems}
+                  onChange={(e) => setShowMetricCards({ ...showMetricCards, totalItems: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                />
+              </label>
+
+              <label className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-300">
+                <span className="text-xs font-bold text-slate-800">Barang Keluar</span>
+                <input
+                  type="checkbox"
+                  checked={showMetricCards.outTransactions}
+                  onChange={(e) => setShowMetricCards({ ...showMetricCards, outTransactions: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                />
+              </label>
+
+              <label className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-300">
+                <span className="text-xs font-bold text-slate-800">Peminjaman Alat</span>
+                <input
+                  type="checkbox"
+                  checked={showMetricCards.lowStockAlert}
+                  onChange={(e) => setShowMetricCards({ ...showMetricCards, lowStockAlert: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                />
+              </label>
+
+              <label className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:border-slate-300">
+                <span className="text-xs font-bold text-slate-800">Penerimaan Masuk</span>
+                <input
+                  type="checkbox"
+                  checked={showMetricCards.inTransactions}
+                  onChange={(e) => setShowMetricCards({ ...showMetricCards, inTransactions: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Section 7: Kontrol & Keamanan Laporan (Master Admin Only) */}
           {isMasterAdmin && (
             <div className="bg-amber-50/60 p-4 sm:p-5 rounded-2xl border border-amber-200/90 space-y-4">
               <div className="flex items-center gap-2 text-amber-950 font-bold text-xs uppercase tracking-wider">
                 <ShieldCheck className="w-4 h-4 text-amber-700" />
-                <span>5. Kontrol Periode Laporan & Kebijakan Approval</span>
+                <span>7. Kontrol Periode Laporan & Kebijakan Approval</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -416,7 +532,7 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
           <button
             type="button"
             onClick={onResetConfig}
-            className="text-slate-600 hover:text-slate-900 font-bold flex items-center gap-1.5"
+            className="text-slate-600 hover:text-slate-900 font-bold flex items-center gap-1.5 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset ke Default</span>
@@ -426,7 +542,7 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl"
+              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
             >
               Batal
             </button>
@@ -443,3 +559,4 @@ export const DashboardSettingsModal: React.FC<DashboardSettingsModalProps> = ({
     </div>
   );
 };
+

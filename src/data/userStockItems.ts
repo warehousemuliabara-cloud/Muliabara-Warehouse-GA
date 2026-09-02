@@ -1,6 +1,6 @@
 import { Item } from '../types';
 
-export const USER_STOCK_ITEMS: Item[] = [
+const RAW_USER_STOCK_ITEMS: Item[] = [
   // Pantry & Konsumsi
   {
     id: 'item-1',
@@ -2292,3 +2292,9 @@ export const USER_STOCK_ITEMS: Item[] = [
     updatedAt: '2026-08-30T08:00:00Z',
   },
 ];
+
+export const USER_STOCK_ITEMS: Item[] = RAW_USER_STOCK_ITEMS.map((item) => ({
+  ...item,
+  rackLocation: item.rackLocation && item.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA',
+}));
+

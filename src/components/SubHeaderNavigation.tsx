@@ -14,7 +14,8 @@ import {
   SlidersHorizontal,
   FileSpreadsheet
 } from 'lucide-react';
-import { UserAccount } from '../types';
+import { UserAccount, DashboardConfig } from '../types';
+import { getThemeConfig } from '../utils/themeStyles';
 
 export type MainTabType = 'dashboard' | 'request' | 'incoming' | 'stock' | 'loans' | 'transactions';
 
@@ -26,6 +27,7 @@ interface SubHeaderNavigationProps {
   activeLoansCount?: number;
   currentUser: UserAccount;
   employeeCount?: number;
+  config?: DashboardConfig;
   onOpenEmployeeModal?: () => void;
   onOpenRoleSwitcher?: () => void;
   onOpenGoogleSheets?: () => void;
@@ -40,6 +42,7 @@ export const SubHeaderNavigation: React.FC<SubHeaderNavigationProps> = ({
   activeLoansCount = 0,
   currentUser,
   employeeCount = 0,
+  config,
   onOpenEmployeeModal,
   onOpenRoleSwitcher,
   onOpenGoogleSheets,
@@ -47,6 +50,8 @@ export const SubHeaderNavigation: React.FC<SubHeaderNavigationProps> = ({
 }) => {
   const [isDashboardDropdownOpen, setIsDashboardDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const theme = getThemeConfig(config?.themeColor);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -119,7 +124,7 @@ export const SubHeaderNavigation: React.FC<SubHeaderNavigationProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border-b border-slate-800 shadow-md">
+    <div className={`${theme.subHeaderBg || 'bg-slate-900'} border-b border-slate-800 shadow-md transition-colors duration-200`}>
       <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
         {/* Desktop Navigation (>= md screens): Full-width evenly spaced tabs with no horizontal scroll */}
         <div className="hidden md:grid md:grid-cols-6 gap-1.5 py-2">

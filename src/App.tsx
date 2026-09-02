@@ -85,6 +85,12 @@ import {
   WarehouseSyncPayload 
 } from './utils/firebaseSync';
 import { playNotificationChime, triggerBrowserNotification } from './utils/helpers';
+import { 
+  getThemeConfig, 
+  getFontFamilyStyle, 
+  getDensityContainerClass, 
+  getPageBackground 
+} from './utils/themeStyles';
 
 const STORAGE_KEY_ITEMS = 'ga_warehouse_items_v8';
 const STORAGE_KEY_TRANSACTIONS = 'ga_warehouse_transactions_v8';
@@ -109,13 +115,22 @@ export default function App() {
     return INITIAL_USERS;
   };
 
+  // Helper to normalize and ensure rack location is clean Gudang GA or Gudang Kayu
+  const sanitizeItemsList = (list: any[]): Item[] => {
+    if (!Array.isArray(list)) return INITIAL_ITEMS;
+    return list.map((item) => ({
+      ...item,
+      rackLocation: item.rackLocation && item.rackLocation.toLowerCase().includes('kayu') ? 'Gudang Kayu' : 'Gudang GA',
+    }));
+  };
+
   // 1. Core items database
   const [items, setItems] = useState<Item[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_ITEMS) || localStorage.getItem('ga_warehouse_items_v6');
-      return saved ? JSON.parse(saved) : INITIAL_ITEMS;
+      return saved ? sanitizeItemsList(JSON.parse(saved)) : sanitizeItemsList(INITIAL_ITEMS);
     } catch {
-      return INITIAL_ITEMS;
+      return sanitizeItemsList(INITIAL_ITEMS);
     }
   });
 
@@ -373,7 +388,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribeCrossTab = subscribeToCrossTabSync((incomingData) => {
       if (incomingData) {
-        if (Array.isArray(incomingData.items)) setItems(incomingData.items);
+        if (Array.isArray(incomingData.items)) setItems(sanitizeItemsList(incomingData.items));
         if (Array.isArray(incomingData.transactions)) setTransactions(incomingData.transactions);
         if (Array.isArray(incomingData.employees)) setEmployees(incomingData.employees);
         if (Array.isArray(incomingData.users)) setUsers(sanitizeUsersList(incomingData.users));
@@ -399,7 +414,7 @@ export default function App() {
           dashboardConfig: current.dashboardConfig,
         });
         if (cloudData) {
-          if (Array.isArray(cloudData.items)) setItems(cloudData.items);
+          if (Array.isArray(cloudData.items)) setItems(sanitizeItemsList(cloudData.items));
           if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
           if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
           if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
@@ -462,7 +477,7 @@ export default function App() {
         }
 
         // Unconditionally update all React state so laptop/phone displays fresh data immediately
-        if (Array.isArray(cloudData.items)) setItems(cloudData.items);
+        if (Array.isArray(cloudData.items)) setItems(sanitizeItemsList(cloudData.items));
         if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
         if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
         if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
@@ -777,14 +792,30 @@ export default function App() {
 
   // Transaction submission (IN & OUT) with instant Cloud broadcast
   const handleSubmitTransaction = (newTrx: Transaction) => {
-    const isPendingApproval = newTrx.type === 'OUT' && newTrx.status === 'PENDING';
+    // If autoApproveRequests is active in dashboardConfig, automatically approve OUT requests
+    let finalTrx = { ...newTrx };
+    if (newTrx.type === 'OUT' && dashboardConfig.autoApproveRequests && newTrx.status === 'PENDING') {
+      finalTrx = {
+        ...newTrx,
+        status: 'APPROVED',
+        approvalInfo: {
+          status: 'APPROVED',
+          approvedBy: 'Sistem (Auto-Approve Aktif)',
+          approverRole: 'MASTER_ADMIN',
+          approvedAt: new Date().toISOString(),
+          notes: 'Disetujui otomatis oleh kebijakan sistem',
+        },
+      };
+    }
+
+    const isPendingApproval = finalTrx.type === 'OUT' && finalTrx.status === 'PENDING';
     let nextItems = items;
 
     if (!isPendingApproval) {
       nextItems = items.map((item) => {
-        const trxItem = newTrx.items.find((i) => i.itemId === item.id);
+        const trxItem = finalTrx.items.find((i) => i.itemId === item.id);
         if (trxItem) {
-          if (newTrx.type === 'OUT') {
+          if (finalTrx.type === 'OUT') {
             const newStock = Math.max(0, item.currentStock - trxItem.quantity);
             return { ...item, currentStock: newStock, updatedAt: new Date().toISOString() };
           } else {
@@ -797,27 +828,27 @@ export default function App() {
       setItems(nextItems);
     }
 
-    const nextTrx = [newTrx, ...transactions];
+    const nextTrx = [finalTrx, ...transactions];
     setTransactions(nextTrx);
 
     // Broadcast immediately to Firestore so other phones/devices see it instantly!
     syncToCloud({ items: nextItems, transactions: nextTrx });
 
-    if (newTrx.type === 'OUT') {
+    if (finalTrx.type === 'OUT') {
       logAudit(
         isPendingApproval ? 'Pengajuan Permintaan Barang' : 'Barang Keluar',
         'TRANSACTIONS',
-        `Permintaan [${newTrx.transactionNumber}] oleh ${newTrx.requesterName} (${newTrx.department}) status: ${newTrx.status || 'COMPLETED'}`
+        `Permintaan [${finalTrx.transactionNumber}] oleh ${finalTrx.requesterName} (${finalTrx.department}) status: ${finalTrx.status || 'COMPLETED'}`
       );
       showToast(
         isPendingApproval 
-          ? `Permintaan [${newTrx.transactionNumber}] tersimpan & menunggu verifikasi Admin.` 
-          : `Permintaan [${newTrx.transactionNumber}] berhasil diproses! Stok terpotong otomatis.`,
+          ? `Permintaan [${finalTrx.transactionNumber}] tersimpan & menunggu verifikasi Admin.` 
+          : `Permintaan [${finalTrx.transactionNumber}] berhasil diproses! Stok terpotong otomatis.`,
         'success'
       );
     } else {
-      logAudit('Barang Masuk', 'TRANSACTIONS', `Penerimaan restock [${newTrx.transactionNumber}] dari ${newTrx.supplier || 'Vendor'}`);
-      showToast(`Penerimaan barang [${newTrx.transactionNumber}] berhasil dicatat! Stok bertambah.`, 'success');
+      logAudit('Barang Masuk', 'TRANSACTIONS', `Penerimaan restock [${finalTrx.transactionNumber}] dari ${finalTrx.supplier || 'Vendor'}`);
+      showToast(`Penerimaan barang [${finalTrx.transactionNumber}] berhasil dicatat! Stok bertambah.`, 'success');
     }
   };
 
@@ -1107,10 +1138,18 @@ export default function App() {
     );
   }
 
+  const theme = getThemeConfig(dashboardConfig.themeColor);
+  const pageBgClass = getPageBackground(dashboardConfig.themeColor, dashboardConfig.mode);
+  const densityMainClass = getDensityContainerClass(dashboardConfig.density);
+  const fontFamilyString = getFontFamilyStyle(dashboardConfig.fontFamily);
+
   return (
-    <div className="min-h-screen bg-slate-100/90 flex flex-col selection:bg-blue-600 selection:text-white antialiased font-sans">
+    <div 
+      className={`min-h-screen ${pageBgClass} flex flex-col selection:bg-blue-600 selection:text-white antialiased transition-colors duration-200`}
+      style={{ fontFamily: fontFamilyString }}
+    >
       {/* 1. Glossy Proportional Header (Non-sticky, responsive and mobile-optimized) */}
-      <header className="bg-gradient-to-r from-[#122240] via-[#1a2f57] to-[#122240] text-white shadow-lg shadow-slate-900/10 border-b border-slate-700/60">
+      <header className={`${theme.headerGradient || 'bg-gradient-to-r from-[#122240] via-[#1a2f57] to-[#122240]'} text-white shadow-lg shadow-slate-900/10 border-b border-slate-700/60 transition-colors duration-200`}>
         <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14 sm:h-15 gap-1.5 sm:gap-3">
             {/* Left: Brand Logo & Title */}
@@ -1273,6 +1312,7 @@ export default function App() {
         pendingApprovalsCount={pendingApprovalsCount}
         currentUser={currentUser}
         employeeCount={employees.length}
+        config={dashboardConfig}
         onOpenEmployeeModal={() => setIsEmployeeModalOpen(true)}
         onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
         onOpenGoogleSheets={() => setIsGoogleSheetsModalOpen(true)}
@@ -1308,7 +1348,7 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-5 pb-12">
+      <main className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${densityMainClass}`}>
         {/* Tab: Dashboard Overview (Ramping, Compact metrics & fast workflow) */}
         {activeTab === 'dashboard' && (
           <DashboardOverview
