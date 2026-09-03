@@ -79,7 +79,22 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
   // Limit display to 10 rows by default
   const [showAllTransactions, setShowAllTransactions] = useState(false);
 
-  const filteredTransactions = transactions
+  // Riwayat Transaksi Keluar & Masuk Barang STRICTLY only shows official finalized movements:
+  // (1) All IN transactions (penerimaan restock fisik)
+  // (2) OUT transactions that have completed physical handover (status === 'COMPLETED' or legacy untyped completed)
+  // Requests that are still PENDING approval or APPROVED but not yet dispatched (serah terima fisik)
+  // remain exclusively in the 'Permintaan Barang' section and MUST NOT appear here.
+  const completedTransactions = transactions.filter((trx) => {
+    if (trx.type === 'OUT') {
+      if (trx.status === 'PENDING' || trx.status === 'APPROVED' || trx.status === 'REJECTED') {
+        return false;
+      }
+      return true;
+    }
+    return true;
+  });
+
+  const filteredTransactions = completedTransactions
     .filter((trx) => {
       const matchType = filterType === 'ALL' || trx.type === filterType;
       const term = searchTerm.toLowerCase();
@@ -265,7 +280,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Semua ({transactions.length})
+              Semua ({completedTransactions.length})
             </button>
             <button
               type="button"
@@ -276,7 +291,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Keluar ({transactions.filter((t) => t.type === 'OUT').length})
+              Keluar ({completedTransactions.filter((t) => t.type === 'OUT').length})
             </button>
             <button
               type="button"
@@ -287,7 +302,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Masuk ({transactions.filter((t) => t.type === 'IN').length})
+              Masuk ({completedTransactions.filter((t) => t.type === 'IN').length})
             </button>
           </div>
 
@@ -935,7 +950,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                       <span>Semua Riwayat Transaksi (IN & OUT)</span>
                     </div>
                     <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
-                      {transactions.length} total
+                      {completedTransactions.length} total
                     </span>
                   </label>
 
@@ -958,7 +973,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                       <span>Hanya Transaksi Barang Keluar (OUT)</span>
                     </div>
                     <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
-                      {transactions.filter(t => t.type === 'OUT').length}
+                      {completedTransactions.filter(t => t.type === 'OUT').length}
                     </span>
                   </label>
 
@@ -981,7 +996,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                       <span>Hanya Transaksi Barang Masuk (IN)</span>
                     </div>
                     <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 rounded-md">
-                      {transactions.filter(t => t.type === 'IN').length}
+                      {completedTransactions.filter(t => t.type === 'IN').length}
                     </span>
                   </label>
                 </div>

@@ -90,6 +90,10 @@ import {
   removeFromLocalLedger,
   clearLocalLedger,
   clearDeletedTransactionIds,
+  getDeletedLoanIds,
+  recordDeletedLoanId,
+  recordDeletedLoanIds,
+  clearDeletedLoanIds,
   SyncState,
   WarehouseSyncPayload 
 } from './utils/firebaseSync';
@@ -152,9 +156,12 @@ export default function App() {
     }
   });
 
-  // Deleted transaction tombstones
+  // Deleted transaction & loan tombstones
   const [deletedTransactionIds, setDeletedTransactionIds] = useState<string[]>(() => {
     return getDeletedTransactionIds();
+  });
+  const [deletedLoanIds, setDeletedLoanIds] = useState<string[]>(() => {
+    return getDeletedLoanIds();
   });
 
   // 2. Transactions log (Safely initialized, combined with permanent local ledger, strictly filtered by tombstones)
@@ -229,11 +236,14 @@ export default function App() {
     }
   });
 
-  // 5. Item loans
+  // 5. Item loans (strictly filtered by deleted loan tombstones)
   const [loans, setLoans] = useState<ItemLoan[]>(() => {
     try {
+      const deletedLoanSet = new Set(getDeletedLoanIds());
       const saved = localStorage.getItem(STORAGE_KEY_LOANS);
-      return saved ? JSON.parse(saved) : INITIAL_LOANS;
+      const raw = saved ? JSON.parse(saved) : INITIAL_LOANS;
+      const list: ItemLoan[] = Array.isArray(raw) ? raw : INITIAL_LOANS;
+      return list.filter((l) => !deletedLoanSet.has(l.id) && !(l.loanNumber && deletedLoanSet.has(l.loanNumber)));
     } catch {
       return INITIAL_LOANS;
     }
@@ -379,6 +389,7 @@ export default function App() {
     items,
     transactions,
     deletedTransactionIds,
+    deletedLoanIds,
     employees,
     users,
     loans,
@@ -393,6 +404,7 @@ export default function App() {
       items,
       transactions,
       deletedTransactionIds,
+      deletedLoanIds,
       employees,
       users,
       loans,
@@ -401,7 +413,7 @@ export default function App() {
       dashboardConfig,
       currentUser,
     };
-  }, [items, transactions, deletedTransactionIds, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser]);
+  }, [items, transactions, deletedTransactionIds, deletedLoanIds, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser]);
 
   // Helper to immediately push authoritative state to Cloud Firestore
   const syncToCloud = (overrides?: Partial<WarehouseSyncPayload>) => {
@@ -410,6 +422,7 @@ export default function App() {
       items: overrides?.items !== undefined ? overrides.items : current.items,
       transactions: overrides?.transactions !== undefined ? overrides.transactions : current.transactions,
       deletedTransactionIds: overrides?.deletedTransactionIds !== undefined ? overrides.deletedTransactionIds : current.deletedTransactionIds,
+      deletedLoanIds: overrides?.deletedLoanIds !== undefined ? overrides.deletedLoanIds : current.deletedLoanIds,
       employees: overrides?.employees !== undefined ? overrides.employees : current.employees,
       users: overrides?.users !== undefined ? overrides.users : current.users,
       loans: overrides?.loans !== undefined ? overrides.loans : current.loans,
@@ -440,6 +453,7 @@ export default function App() {
         items: current.items,
         transactions: current.transactions,
         deletedTransactionIds: current.deletedTransactionIds,
+        deletedLoanIds: current.deletedLoanIds,
         employees: current.employees,
         users: current.users,
         loans: current.loans,
@@ -453,6 +467,7 @@ export default function App() {
     if (Array.isArray(merged.items)) setItems(sanitizeItemsList(merged.items));
     if (Array.isArray(merged.transactions)) setTransactions(sanitizeTransactionsList(merged.transactions));
     if (Array.isArray(merged.deletedTransactionIds)) setDeletedTransactionIds(merged.deletedTransactionIds);
+    if (Array.isArray(merged.deletedLoanIds)) setDeletedLoanIds(merged.deletedLoanIds);
     if (Array.isArray(merged.employees)) setEmployees(merged.employees);
     if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
     if (Array.isArray(merged.loans)) setLoans(merged.loans);
@@ -473,6 +488,7 @@ export default function App() {
         items: current.items,
         transactions: current.transactions,
         deletedTransactionIds: current.deletedTransactionIds,
+        deletedLoanIds: current.deletedLoanIds,
         employees: current.employees,
         users: current.users,
         loans: current.loans,
@@ -520,6 +536,7 @@ export default function App() {
           items: current.items,
           transactions: current.transactions,
           deletedTransactionIds: current.deletedTransactionIds,
+          deletedLoanIds: current.deletedLoanIds,
           employees: current.employees,
           users: current.users,
           loans: current.loans,
@@ -555,32 +572,53 @@ export default function App() {
           (t: any) => !prevTrxIds.has(t.id || t.transactionNumber)
         );
 
-        // Detect status changes on existing transactions (e.g. Approved / Rejected)
+        // Detect status changes:
+        // 1. Newly approved requests (awaiting physical handover)
         const newlyApprovedTrx = newTrxList.filter((t: any) => {
           const old = prevTrx.find((p) => (p.id || p.transactionNumber) === (t.id || t.transactionNumber));
-          return old && old.status === 'PENDING' && (t.status === 'APPROVED' || t.status === 'COMPLETED');
+          return old && old.status === 'PENDING' && t.status === 'APPROVED';
         });
 
-        // If new transactions arrived from another phone/laptop
-        if (newlyAddedTrx.length > 0) {
+        // 2. Newly completed physical handover (dispatched) -> NOW officially enters Riwayat Transaksi Keluar
+        const newlyCompletedTrx = newTrxList.filter((t: any) => {
+          const old = prevTrx.find((p) => (p.id || p.transactionNumber) === (t.id || t.transactionNumber));
+          return old && old.status !== 'COMPLETED' && t.status === 'COMPLETED';
+        });
+
+        if (newlyCompletedTrx.length > 0) {
           playNotificationChime();
-          const firstNew = newlyAddedTrx[0];
-          const isPending = firstNew.status === 'PENDING';
-          const notifTitle = isPending ? '🔔 Permintaan Barang Baru' : '🔔 Transaksi Barang Baru';
-          const notifBody = `${firstNew.transactionNumber} - ${firstNew.requesterName || firstNew.supplier || 'Petugas'} (${firstNew.department || 'Gudang'})`;
-          
+          const firstCompleted = newlyCompletedTrx[0];
+          const notifTitle = '📦 Serah Terima Fisik Barang Selesai';
+          const notifBody = `${firstCompleted.transactionNumber} - ${firstCompleted.requesterName || 'Pemohon'} (${firstCompleted.department || 'Gudang'}) telah serah terima fisik & resmi tercatat pada Riwayat Transaksi Keluar.`;
           triggerBrowserNotification(notifTitle, notifBody);
-          showToast(
-            `${notifTitle}: [${firstNew.transactionNumber}] oleh ${firstNew.requesterName || firstNew.supplier || 'Petugas'}${isPending ? ' menunggu Persetujuan Admin' : ''}`,
-            isPending ? 'info' : 'success'
-          );
+          showToast(`📦 [${firstCompleted.transactionNumber}] serah terima fisik selesai! Resmi masuk ke Riwayat Transaksi Keluar.`, 'success');
         } else if (newlyApprovedTrx.length > 0) {
           playNotificationChime();
           const firstApproved = newlyApprovedTrx[0];
-          const notifTitle = '✅ Permintaan Disetujui';
-          const notifBody = `${firstApproved.transactionNumber} telah disetujui Admin. Siap diserahkan.`;
+          const notifTitle = '✅ Permintaan Disetujui Admin';
+          const notifBody = `${firstApproved.transactionNumber} telah disetujui. Menunggu serah terima fisik sebelum masuk log riwayat transaksi.`;
           triggerBrowserNotification(notifTitle, notifBody);
-          showToast(`✅ Permintaan [${firstApproved.transactionNumber}] telah disetujui!`, 'success');
+          showToast(`✅ Permintaan [${firstApproved.transactionNumber}] disetujui Admin. Menunggu serah terima fisik barang.`, 'info');
+        } else if (newlyAddedTrx.length > 0) {
+          playNotificationChime();
+          const firstNew = newlyAddedTrx[0];
+          const isPending = firstNew.type === 'OUT' && firstNew.status === 'PENDING';
+          if (isPending) {
+            const notifTitle = '🔔 Pengajuan Permintaan Barang Baru';
+            const notifBody = `${firstNew.transactionNumber} diajukan oleh ${firstNew.requesterName} (${firstNew.department}) - Menunggu Approval Admin di menu Permintaan.`;
+            triggerBrowserNotification(notifTitle, notifBody);
+            showToast(`🔔 Permintaan baru [${firstNew.transactionNumber}] oleh ${firstNew.requesterName} (Menunggu Approval di menu Permintaan)`, 'info');
+          } else if (firstNew.type === 'IN') {
+            const notifTitle = '📥 Barang Masuk Baru Tercatat';
+            const notifBody = `${firstNew.transactionNumber} dari ${firstNew.supplier || 'Vendor'} (${firstNew.items?.length || 0} item)`;
+            triggerBrowserNotification(notifTitle, notifBody);
+            showToast(`📥 [${firstNew.transactionNumber}] penerimaan barang masuk resmi dicatat di Riwayat Transaksi.`, 'success');
+          } else {
+            const notifTitle = '📤 Transaksi Barang Keluar Selesai';
+            const notifBody = `${firstNew.transactionNumber} untuk ${firstNew.requesterName} (${firstNew.department})`;
+            triggerBrowserNotification(notifTitle, notifBody);
+            showToast(`📤 [${firstNew.transactionNumber}] transaksi barang keluar selesai & tercatat di Riwayat Transaksi.`, 'success');
+          }
         }
 
         // Apply with safe union merge
@@ -999,25 +1037,37 @@ export default function App() {
     const nextTrx = [finalTrx, ...transactions];
     setTransactions(nextTrx);
 
-    // Save permanently to local ledger immediately (never lost even if device drops offline)
-    saveToLocalLedger(finalTrx);
+    // Save permanently to local ledger immediately only if officially completed (not pending approval)
+    if (!isPendingApproval) {
+      saveToLocalLedger(finalTrx);
+    }
 
     // Broadcast immediately to Firestore so other phones/devices see it instantly!
     syncToCloud({ items: nextItems, transactions: nextTrx });
     setOfflineQueueLength(getOfflineQueueCount());
 
     if (finalTrx.type === 'OUT') {
-      logAudit(
-        isPendingApproval ? 'Pengajuan Permintaan Barang' : 'Barang Keluar',
-        'TRANSACTIONS',
-        `Permintaan [${finalTrx.transactionNumber}] oleh ${finalTrx.requesterName} (${finalTrx.department}) status: ${finalTrx.status || 'COMPLETED'}`
-      );
-      showToast(
-        isPendingApproval 
-          ? `Permintaan [${finalTrx.transactionNumber}] tersimpan & menunggu verifikasi Admin.` 
-          : `Permintaan [${finalTrx.transactionNumber}] berhasil diproses! Stok terpotong otomatis.`,
-        'success'
-      );
+      if (isPendingApproval) {
+        logAudit(
+          'Pengajuan Permintaan Barang',
+          'USERS',
+          `Permintaan [${finalTrx.transactionNumber}] diajukan oleh ${finalTrx.requesterName} (${finalTrx.department}) - Menunggu Approval Admin`
+        );
+        showToast(
+          `Pengajuan permohonan [${finalTrx.transactionNumber}] berhasil dikirim. Menunggu verifikasi & approval Admin di menu Permintaan.`,
+          'info'
+        );
+      } else {
+        logAudit(
+          'Barang Keluar',
+          'TRANSACTIONS',
+          `Pengeluaran barang [${finalTrx.transactionNumber}] untuk ${finalTrx.requesterName} (${finalTrx.department})`
+        );
+        showToast(
+          `Pengeluaran barang [${finalTrx.transactionNumber}] berhasil diproses & dicatat ke Riwayat Transaksi. Stok terpotong.`,
+          'success'
+        );
+      }
     } else {
       logAudit('Barang Masuk', 'TRANSACTIONS', `Penerimaan restock [${finalTrx.transactionNumber}] dari ${finalTrx.supplier || 'Vendor'}`);
       showToast(`Penerimaan barang [${finalTrx.transactionNumber}] berhasil dicatat! Stok bertambah.`, 'success');
@@ -1051,8 +1101,8 @@ export default function App() {
     setTransactions(nextTrx);
     syncToCloud({ transactions: nextTrx });
 
-    logAudit('Approval Permintaan', 'TRANSACTIONS', `Admin menyetujui permintaan [${trx.transactionNumber}] (${trx.requesterName})`);
-    showToast(`Permintaan [${trx.transactionNumber}] telah disetujui. Siap diserah-terimakan.`, 'success');
+    logAudit('Approval Permintaan', 'USERS', `Admin menyetujui permohonan [${trx.transactionNumber}] (${trx.requesterName}). Menunggu serah terima fisik.`);
+    showToast(`Permintaan [${trx.transactionNumber}] telah disetujui. Siap untuk proses serah terima fisik barang.`, 'success');
   };
 
   const handleRejectRequest = (trxId: string, notes?: string) => {
@@ -1105,7 +1155,7 @@ export default function App() {
       if (t.id === trxId) {
         return {
           ...t,
-          status: 'COMPLETED',
+          status: 'COMPLETED' as const,
           updatedAt: nowIso,
           dispatchedBy: currentUser.fullName,
           dispatchedAt: nowIso,
@@ -1115,10 +1165,21 @@ export default function App() {
     });
     setTransactions(nextTrx);
 
+    // Save completed transaction to permanent local ledger
+    const completedTrx = nextTrx.find(t => t.id === trxId);
+    if (completedTrx) {
+      saveToLocalLedger(completedTrx);
+    }
+
     syncToCloud({ items: nextItems, transactions: nextTrx });
 
-    logAudit('Serah Terima Barang', 'TRANSACTIONS', `Barang [${trx.transactionNumber}] telah diserahkan ke ${trx.requesterName}`);
-    showToast(`Serah terima barang [${trx.transactionNumber}] selesai! Stok terpotong.`, 'success');
+    playNotificationChime();
+    triggerBrowserNotification(
+      '📦 Serah Terima Fisik Barang Selesai',
+      `Barang [${trx.transactionNumber}] telah diserahkan fisik ke ${trx.requesterName} & resmi tercatat pada Riwayat Transaksi Keluar.`
+    );
+    logAudit('Serah Terima Barang', 'TRANSACTIONS', `Barang [${trx.transactionNumber}] telah diserahkan fisik ke ${trx.requesterName} dan resmi dicatat pada Riwayat Transaksi Keluar`);
+    showToast(`✅ Serah terima fisik selesai! Barang [${trx.transactionNumber}] resmi dicatat pada Riwayat Transaksi Keluar & Masuk.`, 'success');
   };
 
   const handleDeleteTransaction = (transactionId: string, revertStock: boolean = false) => {
@@ -1270,15 +1331,26 @@ export default function App() {
       });
     }
 
+    // Record tombstones for all cleared loans so they never resurrect upon sync or new transactions
+    const removedLoans = loans.filter((l) => !nextLoans.some((nl) => nl.id === l.id));
+    const removedKeys: string[] = [];
+    removedLoans.forEach((l) => {
+      if (l.id) removedKeys.push(l.id);
+      if (l.loanNumber) removedKeys.push(l.loanNumber);
+    });
+    recordDeletedLoanIds(removedKeys);
+    const nextDeletedLoans = getDeletedLoanIds();
+    setDeletedLoanIds(nextDeletedLoans);
+
     setLoans(nextLoans);
     try {
       localStorage.setItem(STORAGE_KEY_LOANS, JSON.stringify(nextLoans));
     } catch (e) {
       console.error(e);
     }
-    syncToCloud({ loans: nextLoans });
-    logAudit('Bersihkan Riwayat Pinjaman', 'LOANS', `Membersihkan log riwayat pinjaman: scope ${options.scope}`);
-    showToast('Riwayat peminjaman barang telah dibersihkan secara permanen.', 'warning');
+    syncToCloud({ loans: nextLoans, deletedLoanIds: nextDeletedLoans });
+    logAudit('Bersihkan Riwayat Pinjaman', 'LOANS', `Membersihkan log riwayat pinjaman: scope ${options.scope} (${removedLoans.length} data dihapus)`);
+    showToast(`Riwayat peminjaman barang (${removedLoans.length} record) telah dibersihkan secara permanen.`, 'warning');
   };
 
   // Item Loans operations with immediate Cloud sync
@@ -1350,15 +1422,28 @@ export default function App() {
     const loan = loans.find((l) => l.id === loanId);
     const nextLoans = loans.filter((l) => l.id !== loanId);
     setLoans(nextLoans);
-    syncToCloud({ loans: nextLoans });
+
+    recordDeletedLoanId(loanId, loan?.loanNumber);
+    const nextDeletedLoans = getDeletedLoanIds();
+    setDeletedLoanIds(nextDeletedLoans);
+
+    try {
+      localStorage.setItem(STORAGE_KEY_LOANS, JSON.stringify(nextLoans));
+    } catch (e) {
+      console.error(e);
+    }
+
+    syncToCloud({ loans: nextLoans, deletedLoanIds: nextDeletedLoans });
     logAudit('Hapus Data Pinjaman', 'LOANS', `Menghapus arsip pinjaman ${loan?.loanNumber || loanId}`);
-    showToast(`Data pinjaman [${loan?.loanNumber || loanId}] telah dihapus.`, 'warning');
+    showToast(`Data pinjaman [${loan?.loanNumber || loanId}] telah dihapus permanen.`, 'warning');
   };
 
   // Reset all sample data to default
   const handleResetSampleData = () => {
     clearDeletedTransactionIds();
     setDeletedTransactionIds([]);
+    clearDeletedLoanIds();
+    setDeletedLoanIds([]);
     setItems(INITIAL_ITEMS);
     setTransactions(INITIAL_TRANSACTIONS);
     setEmployees(INITIAL_EMPLOYEES);
@@ -1379,6 +1464,7 @@ export default function App() {
       items: INITIAL_ITEMS,
       transactions: INITIAL_TRANSACTIONS,
       deletedTransactionIds: [],
+      deletedLoanIds: [],
       employees: INITIAL_EMPLOYEES,
       users: INITIAL_USERS,
       loans: INITIAL_LOANS,

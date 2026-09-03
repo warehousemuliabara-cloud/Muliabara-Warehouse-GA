@@ -173,6 +173,7 @@ export interface WarehouseSyncPayload {
   items: any[];
   transactions: any[];
   deletedTransactionIds?: string[];
+  deletedLoanIds?: string[];
   employees: any[];
   users: any[];
   loans: any[];
@@ -286,9 +287,10 @@ function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
     const userCount = (data.users || []).length;
     const loanSummary = (data.loans || []).map((l) => `${l.id}:${l.status}:${l.actualReturnDate || l.borrowDate || ''}`).join('|');
     const deletedCount = (data.deletedTransactionIds || []).length;
+    const deletedLoanCount = (data.deletedLoanIds || []).length;
     const rolePermsKey = JSON.stringify(data.rolePermissions || {});
     const cfgKey = JSON.stringify(data.dashboardConfig || {});
-    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_del[${deletedCount}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
+    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_del[${deletedCount}]_delLoan[${deletedLoanCount}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
   } catch {
     return String(Date.now());
   }
@@ -314,6 +316,58 @@ const getLoanRank = (l: any): number => {
 const STORAGE_KEY_OFFLINE_QUEUE = 'ga_warehouse_offline_queue_v2';
 const STORAGE_KEY_LOCAL_LEDGER = 'ga_warehouse_trx_local_ledger_v2';
 const STORAGE_KEY_DELETED_TRX = 'ga_warehouse_deleted_trx_ids_v1';
+const STORAGE_KEY_DELETED_LOANS = 'ga_warehouse_deleted_loan_ids_v1';
+
+// Loan Tombstone Management: Track deleted loans so they NEVER reappear across devices or on other transactions
+export function getDeletedLoanIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DELETED_LOANS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordDeletedLoanId(loanId: string, loanNumber?: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = getDeletedLoanIds();
+    const set = new Set(Array.isArray(current) ? current : []);
+    if (loanId) set.add(loanId);
+    if (loanNumber) set.add(loanNumber);
+    const updated = Array.from(set).slice(-1000);
+    localStorage.setItem(STORAGE_KEY_DELETED_LOANS, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Failed to record deleted loan id:', e);
+  }
+}
+
+export function recordDeletedLoanIds(idsAndNumbers: string[]) {
+  if (typeof window === 'undefined' || !Array.isArray(idsAndNumbers)) return;
+  try {
+    const current = getDeletedLoanIds();
+    const set = new Set(Array.isArray(current) ? current : []);
+    idsAndNumbers.forEach((id) => {
+      if (id) set.add(id);
+    });
+    const updated = Array.from(set).slice(-1000);
+    localStorage.setItem(STORAGE_KEY_DELETED_LOANS, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Failed to record deleted loan ids:', e);
+  }
+}
+
+export function clearDeletedLoanIds() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_DELETED_LOANS);
+  } catch (e) {
+    // safe
+  }
+}
 
 // Tombstone Management: Track deleted transactions so they NEVER reappear across devices
 export function getDeletedTransactionIds(): string[] {
@@ -628,15 +682,34 @@ export function smartMergeWarehouseData(
     }
   }
 
-  // 2. BIDIRECTIONAL UNION MERGE FOR LOANS
+  // 2. BIDIRECTIONAL UNION MERGE FOR LOANS WITH STRICT TOMBSTONE FILTERING
+  const localDeletedLoans = getDeletedLoanIds();
+  const remoteDeletedLoans = Array.isArray(remoteObj.deletedLoanIds) ? remoteObj.deletedLoanIds : [];
+  const payloadLocalDeletedLoans = Array.isArray(localObj.deletedLoanIds) ? localObj.deletedLoanIds : [];
+
+  const allDeletedLoanSet = new Set<string>([
+    ...localDeletedLoans,
+    ...remoteDeletedLoans,
+    ...payloadLocalDeletedLoans,
+  ]);
+
+  if (typeof window !== 'undefined' && allDeletedLoanSet.size > 0) {
+    try {
+      localStorage.setItem(STORAGE_KEY_DELETED_LOANS, JSON.stringify(Array.from(allDeletedLoanSet).slice(-1000)));
+    } catch {}
+  }
+
   const loanMap = new Map<string, any>();
   (localObj.loans || []).forEach((l: any) => {
     const key = l.id || l.loanNumber;
-    if (key) loanMap.set(key, l);
+    if (!key) return;
+    if (allDeletedLoanSet.has(l.id) || (l.loanNumber && allDeletedLoanSet.has(l.loanNumber))) return;
+    loanMap.set(key, l);
   });
   (remoteObj.loans || []).forEach((remoteLoan: any) => {
     const key = remoteLoan.id || remoteLoan.loanNumber;
     if (!key) return;
+    if (allDeletedLoanSet.has(remoteLoan.id) || (remoteLoan.loanNumber && allDeletedLoanSet.has(remoteLoan.loanNumber))) return;
     const localLoan = loanMap.get(key);
     if (!localLoan) {
       loanMap.set(key, remoteLoan);
@@ -648,9 +721,9 @@ export function smartMergeWarehouseData(
       }
     }
   });
-  const mergedLoans = Array.from(loanMap.values()).sort(
-    (a, b) => new Date(b.loanDate || 0).getTime() - new Date(a.loanDate || 0).getTime()
-  );
+  const mergedLoans = Array.from(loanMap.values())
+    .filter((l: any) => !allDeletedLoanSet.has(l.id) && !(l.loanNumber && allDeletedLoanSet.has(l.loanNumber)))
+    .sort((a, b) => new Date(b.loanDate || 0).getTime() - new Date(a.loanDate || 0).getTime());
 
   // 3. UNION MERGE FOR ITEMS (Preserve stock updates)
   const itemMap = new Map<string, any>();
@@ -714,6 +787,7 @@ export function smartMergeWarehouseData(
     items: mergedItems.length > 0 ? mergedItems : (remoteObj.items || localObj.items || []),
     transactions: mergedTransactions,
     deletedTransactionIds: Array.from(allDeletedSet).slice(-500),
+    deletedLoanIds: Array.from(allDeletedLoanSet).slice(-500),
     employees: mergedEmployees.length > 0 ? mergedEmployees : (remoteObj.employees || localObj.employees || []),
     users: mergedUsers.length > 0 ? mergedUsers : (remoteObj.users || localObj.users || []),
     loans: mergedLoans,
@@ -762,6 +836,7 @@ export async function fetchFreshWarehouseData(
         items: currentLocal.items || [],
         transactions: initialTransactions,
         deletedTransactionIds: getDeletedTransactionIds(),
+        deletedLoanIds: getDeletedLoanIds(),
         employees: currentLocal.employees || [],
         users: currentLocal.users || [],
         loans: currentLocal.loans || [],
@@ -907,9 +982,21 @@ export async function pushWarehouseSync(
 
   const allDeletedSet = new Set(deletedIds);
 
+  const deletedLoanIds = Array.from(new Set([
+    ...getDeletedLoanIds(),
+    ...(payload.deletedLoanIds || []),
+  ])).slice(-500);
+
+  const allDeletedLoanSet = new Set(deletedLoanIds);
+
   // Filter out any deleted transaction before saving to ledger or sending
   const filteredTransactions = (payload.transactions || []).filter((trx: any) => {
     return !allDeletedSet.has(trx.id) && !(trx.transactionNumber && allDeletedSet.has(trx.transactionNumber));
+  });
+
+  // Filter out any deleted loan before sending
+  const filteredLoans = (payload.loans || []).filter((l: any) => {
+    return !allDeletedLoanSet.has(l.id) && !(l.loanNumber && allDeletedLoanSet.has(l.loanNumber));
   });
 
   // Save each valid transaction to permanent local ledger
@@ -919,9 +1006,10 @@ export async function pushWarehouseSync(
     items: payload.items || [],
     transactions: filteredTransactions,
     deletedTransactionIds: deletedIds,
+    deletedLoanIds: deletedLoanIds,
     employees: payload.employees || [],
     users: payload.users || [],
-    loans: payload.loans || [],
+    loans: filteredLoans,
     auditLogs: (payload.auditLogs || []).slice(0, 50),
     rolePermissions: payload.rolePermissions || {},
     dashboardConfig: payload.dashboardConfig || {},
