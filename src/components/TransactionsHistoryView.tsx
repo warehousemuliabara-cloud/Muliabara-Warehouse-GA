@@ -81,14 +81,17 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
 
   // Riwayat Transaksi Keluar & Masuk Barang STRICTLY only shows official finalized movements:
   // (1) All IN transactions (penerimaan restock fisik)
-  // (2) OUT transactions that have completed physical handover (status === 'COMPLETED')
-  // Requests that are still PENDING approval or APPROVED but not yet physically handed over
-  // MUST NOT appear in Riwayat Transaksi Keluar & Masuk Barang.
+  // (2) OUT transactions that have completed physical handover (status === 'COMPLETED' or legacy untyped completed)
+  // Requests that are still PENDING approval or APPROVED but not yet dispatched (serah terima fisik)
+  // remain exclusively in the 'Permintaan Barang' section and MUST NOT appear here.
   const completedTransactions = transactions.filter((trx) => {
     if (trx.type === 'OUT') {
-      return trx.status === 'COMPLETED';
+      if (trx.status === 'PENDING' || trx.status === 'APPROVED' || trx.status === 'REJECTED') {
+        return false;
+      }
+      return true;
     }
-    return trx.type === 'IN';
+    return true;
   });
 
   const filteredTransactions = completedTransactions

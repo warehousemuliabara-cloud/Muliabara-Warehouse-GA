@@ -92,40 +92,6 @@ function initCrossDeviceRelay() {
 
         latestRelayPayload = payload;
 
-        // Automatically cache authoritative data in localStorage so Netlify / fresh tab gets it immediately!
-        if (typeof window !== 'undefined' && payload) {
-          try {
-            if (Array.isArray(payload.deletedUserIds) && payload.deletedUserIds.length > 0) {
-              recordDeletedUserIds(payload.deletedUserIds);
-            }
-            if (Array.isArray(payload.deletedLoanIds) && payload.deletedLoanIds.length > 0) {
-              recordDeletedLoanIds(payload.deletedLoanIds);
-            }
-            if (Array.isArray(payload.deletedTransactionIds) && payload.deletedTransactionIds.length > 0) {
-              recordDeletedTransactionIds(payload.deletedTransactionIds);
-            }
-            if (Array.isArray(payload.users) && payload.users.length > 0) {
-              const deletedUserSet = new Set(getDeletedUserIds().map((s) => s.toLowerCase().trim()));
-              const cleaned = payload.users.filter((u: any) => {
-                if (!u) return false;
-                const id = u.id ? String(u.id).toLowerCase().trim() : '';
-                const username = u.username ? String(u.username).toLowerCase().trim() : '';
-                if (id && deletedUserSet.has(id)) return false;
-                if (username && deletedUserSet.has(username)) return false;
-                return true;
-              });
-              if (cleaned.length > 0) {
-                localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(cleaned));
-              }
-            }
-            if (payload.dashboardConfig) {
-              localStorage.setItem('ga_warehouse_config_v8', JSON.stringify(payload.dashboardConfig));
-            }
-          } catch {
-            // safe
-          }
-        }
-
         const newHash = computeDataHash(payload);
         if (newHash === lastAppliedHash) {
           return;
@@ -208,7 +174,6 @@ export interface WarehouseSyncPayload {
   transactions: any[];
   deletedTransactionIds?: string[];
   deletedLoanIds?: string[];
-  deletedUserIds?: string[];
   employees: any[];
   users: any[];
   loans: any[];
@@ -323,10 +288,9 @@ function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
     const loanSummary = (data.loans || []).map((l) => `${l.id}:${l.status}:${l.actualReturnDate || l.borrowDate || ''}`).join('|');
     const deletedCount = (data.deletedTransactionIds || []).length;
     const deletedLoanCount = (data.deletedLoanIds || []).length;
-    const deletedUserCount = (data.deletedUserIds || []).length;
     const rolePermsKey = JSON.stringify(data.rolePermissions || {});
     const cfgKey = JSON.stringify(data.dashboardConfig || {});
-    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_del[${deletedCount}]_delLoan[${deletedLoanCount}]_delUser[${deletedUserCount}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
+    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_del[${deletedCount}]_delLoan[${deletedLoanCount}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
   } catch {
     return String(Date.now());
   }
@@ -353,71 +317,6 @@ const STORAGE_KEY_OFFLINE_QUEUE = 'ga_warehouse_offline_queue_v2';
 const STORAGE_KEY_LOCAL_LEDGER = 'ga_warehouse_trx_local_ledger_v2';
 const STORAGE_KEY_DELETED_TRX = 'ga_warehouse_deleted_trx_ids_v1';
 const STORAGE_KEY_DELETED_LOANS = 'ga_warehouse_deleted_loan_ids_v1';
-const STORAGE_KEY_DELETED_USERS = 'ga_warehouse_deleted_user_ids_v8';
-
-// User Tombstone Management: Track deleted user accounts so they NEVER reappear across devices, Firestore, or Netlify
-export function getDeletedUserIds(): string[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_DELETED_USERS);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function recordDeletedUserId(userId: string, username?: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const current = getDeletedUserIds();
-    const set = new Set(Array.isArray(current) ? current : []);
-    if (userId) set.add(userId);
-    if (username) {
-      set.add(username);
-      set.add(username.toLowerCase().trim());
-    }
-    const updated = Array.from(set).slice(-500);
-    localStorage.setItem(STORAGE_KEY_DELETED_USERS, JSON.stringify(updated));
-  } catch (e) {
-    console.warn('Failed to record deleted user id:', e);
-  }
-}
-
-export function recordDeletedUserIds(idsAndUsernames: string[]) {
-  if (typeof window === 'undefined' || !Array.isArray(idsAndUsernames)) return;
-  try {
-    const current = getDeletedUserIds();
-    const set = new Set(Array.isArray(current) ? current : []);
-    idsAndUsernames.forEach((id) => {
-      if (id) {
-        set.add(id);
-        set.add(id.toLowerCase().trim());
-      }
-    });
-    const updated = Array.from(set).slice(-500);
-    localStorage.setItem(STORAGE_KEY_DELETED_USERS, JSON.stringify(updated));
-  } catch (e) {
-    console.warn('Failed to record deleted user ids:', e);
-  }
-}
-
-export function clearDeletedUserTombstone(userId: string, username?: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const current = getDeletedUserIds();
-    const set = new Set(Array.isArray(current) ? current : []);
-    if (userId) set.delete(userId);
-    if (username) {
-      set.delete(username);
-      set.delete(username.toLowerCase().trim());
-    }
-    localStorage.setItem(STORAGE_KEY_DELETED_USERS, JSON.stringify(Array.from(set)));
-  } catch (e) {
-    // safe
-  }
-}
 
 // Loan Tombstone Management: Track deleted loans so they NEVER reappear across devices or on other transactions
 export function getDeletedLoanIds(): string[] {
@@ -437,14 +336,8 @@ export function recordDeletedLoanId(loanId: string, loanNumber?: string) {
   try {
     const current = getDeletedLoanIds();
     const set = new Set(Array.isArray(current) ? current : []);
-    if (loanId) {
-      set.add(loanId);
-      set.add(String(loanId).toLowerCase().trim());
-    }
-    if (loanNumber) {
-      set.add(loanNumber);
-      set.add(String(loanNumber).toLowerCase().trim());
-    }
+    if (loanId) set.add(loanId);
+    if (loanNumber) set.add(loanNumber);
     const updated = Array.from(set).slice(-1000);
     localStorage.setItem(STORAGE_KEY_DELETED_LOANS, JSON.stringify(updated));
   } catch (e) {
@@ -458,10 +351,7 @@ export function recordDeletedLoanIds(idsAndNumbers: string[]) {
     const current = getDeletedLoanIds();
     const set = new Set(Array.isArray(current) ? current : []);
     idsAndNumbers.forEach((id) => {
-      if (id) {
-        set.add(id);
-        set.add(String(id).toLowerCase().trim());
-      }
+      if (id) set.add(id);
     });
     const updated = Array.from(set).slice(-1000);
     localStorage.setItem(STORAGE_KEY_DELETED_LOANS, JSON.stringify(updated));
@@ -809,38 +699,17 @@ export function smartMergeWarehouseData(
     } catch {}
   }
 
-  // Normalized loan tombstone lookup (case-insensitive and trimmed)
-  const normalizedDeletedLoanSet = new Set<string>();
-  allDeletedLoanSet.forEach((v) => {
-    if (v) {
-      normalizedDeletedLoanSet.add(String(v).trim());
-      normalizedDeletedLoanSet.add(String(v).toLowerCase().trim());
-    }
-  });
-
-  const isLoanDeleted = (l: any): boolean => {
-    if (!l) return true;
-    const id = l.id ? String(l.id).trim() : '';
-    const idLower = l.id ? String(l.id).toLowerCase().trim() : '';
-    const num = l.loanNumber ? String(l.loanNumber).trim() : '';
-    const numLower = l.loanNumber ? String(l.loanNumber).toLowerCase().trim() : '';
-    return (
-      (id && (normalizedDeletedLoanSet.has(id) || normalizedDeletedLoanSet.has(idLower))) ||
-      (num && (normalizedDeletedLoanSet.has(num) || normalizedDeletedLoanSet.has(numLower)))
-    );
-  };
-
   const loanMap = new Map<string, any>();
   (localObj.loans || []).forEach((l: any) => {
-    if (isLoanDeleted(l)) return;
     const key = l.id || l.loanNumber;
     if (!key) return;
+    if (allDeletedLoanSet.has(l.id) || (l.loanNumber && allDeletedLoanSet.has(l.loanNumber))) return;
     loanMap.set(key, l);
   });
   (remoteObj.loans || []).forEach((remoteLoan: any) => {
-    if (isLoanDeleted(remoteLoan)) return;
     const key = remoteLoan.id || remoteLoan.loanNumber;
     if (!key) return;
+    if (allDeletedLoanSet.has(remoteLoan.id) || (remoteLoan.loanNumber && allDeletedLoanSet.has(remoteLoan.loanNumber))) return;
     const localLoan = loanMap.get(key);
     if (!localLoan) {
       loanMap.set(key, remoteLoan);
@@ -853,7 +722,7 @@ export function smartMergeWarehouseData(
     }
   });
   const mergedLoans = Array.from(loanMap.values())
-    .filter((l: any) => !isLoanDeleted(l))
+    .filter((l: any) => !allDeletedLoanSet.has(l.id) && !(l.loanNumber && allDeletedLoanSet.has(l.loanNumber)))
     .sort((a, b) => new Date(b.loanDate || 0).getTime() - new Date(a.loanDate || 0).getTime());
 
   // 3. UNION MERGE FOR ITEMS (Preserve stock updates)
@@ -884,56 +753,10 @@ export function smartMergeWarehouseData(
   (remoteObj.employees || []).forEach((e: any) => { if (e.id || e.name) empMap.set(e.id || e.name, e); });
   const mergedEmployees = Array.from(empMap.values());
 
-  // 4b. BIDIRECTIONAL UNION MERGE FOR USERS WITH STRICT TOMBSTONE FILTERING
-  const localDeletedUsers = getDeletedUserIds();
-  const remoteDeletedUsers = Array.isArray(remoteObj.deletedUserIds) ? remoteObj.deletedUserIds : [];
-  const payloadLocalDeletedUsers = Array.isArray(localObj.deletedUserIds) ? localObj.deletedUserIds : [];
-
-  const allDeletedUserIds = Array.from(new Set([
-    ...localDeletedUsers,
-    ...remoteDeletedUsers,
-    ...payloadLocalDeletedUsers,
-  ])).slice(-500);
-
-  const allDeletedUserSet = new Set(allDeletedUserIds.map((s: string) => String(s).toLowerCase().trim()));
-
-  if (typeof window !== 'undefined' && allDeletedUserIds.length > 0) {
-    try {
-      localStorage.setItem(STORAGE_KEY_DELETED_USERS, JSON.stringify(allDeletedUserIds));
-    } catch {}
-  }
-
-  const isUserDeleted = (u: any): boolean => {
-    if (!u) return true;
-    const id = u.id ? String(u.id).toLowerCase().trim() : '';
-    const username = u.username ? String(u.username).toLowerCase().trim() : '';
-    if (id && allDeletedUserSet.has(id)) return true;
-    if (username && allDeletedUserSet.has(username)) return true;
-    return false;
-  };
-
   const userMap = new Map<string, any>();
-  (localObj.users || []).forEach((u: any) => {
-    if (!u || isUserDeleted(u)) return;
-    const key = u.id || u.username;
-    if (key) userMap.set(key, u);
-  });
-  (remoteObj.users || []).forEach((u: any) => {
-    if (!u || isUserDeleted(u)) return;
-    const key = u.id || u.username;
-    if (!key) return;
-    const existing = userMap.get(key);
-    if (!existing) {
-      userMap.set(key, u);
-    } else {
-      const remoteTime = new Date(u.updatedAt || u.createdAt || 0).getTime();
-      const localTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-      if (remoteTime >= localTime) {
-        userMap.set(key, u);
-      }
-    }
-  });
-  const mergedUsers = Array.from(userMap.values()).filter((u: any) => !isUserDeleted(u));
+  (localObj.users || []).forEach((u: any) => { if (u.id || u.username) userMap.set(u.id || u.username, u); });
+  (remoteObj.users || []).forEach((u: any) => { if (u.id || u.username) userMap.set(u.id || u.username, u); });
+  const mergedUsers = Array.from(userMap.values());
 
   // 5. Audit logs
   const logMap = new Map<string, any>();
@@ -965,9 +788,8 @@ export function smartMergeWarehouseData(
     transactions: mergedTransactions,
     deletedTransactionIds: Array.from(allDeletedSet).slice(-500),
     deletedLoanIds: Array.from(allDeletedLoanSet).slice(-500),
-    deletedUserIds: allDeletedUserIds,
     employees: mergedEmployees.length > 0 ? mergedEmployees : (remoteObj.employees || localObj.employees || []),
-    users: mergedUsers,
+    users: mergedUsers.length > 0 ? mergedUsers : (remoteObj.users || localObj.users || []),
     loans: mergedLoans,
     auditLogs: mergedAuditLogs,
     rolePermissions: Object.keys(mergedPermissions).length > 0 ? mergedPermissions : localObj.rolePermissions || {},
@@ -1015,7 +837,6 @@ export async function fetchFreshWarehouseData(
         transactions: initialTransactions,
         deletedTransactionIds: getDeletedTransactionIds(),
         deletedLoanIds: getDeletedLoanIds(),
-        deletedUserIds: getDeletedUserIds(),
         employees: currentLocal.employees || [],
         users: currentLocal.users || [],
         loans: currentLocal.loans || [],
@@ -1052,53 +873,6 @@ export async function fetchFreshWarehouseData(
     }
     return null;
   }
-}
-
-/**
- * Robust cloud data fetcher that queries Firestore and waits for Real-Time Relay payload.
- * Crucial for Netlify where Firestore quota might be limited or WebSocket connection takes 1-2 seconds.
- */
-export async function getAuthoritativeCloudData(
-  currentLocal?: Partial<WarehouseSyncPayload>,
-  maxWaitMs: number = 3000
-): Promise<WarehouseSyncPayload | null> {
-  // If we already have real-time relay data, return it immediately
-  if (latestRelayPayload) {
-    return currentLocal ? smartMergeWarehouseData(currentLocal, latestRelayPayload) : latestRelayPayload;
-  }
-
-  // Attempt fresh pull from Firestore
-  const fetchPromise = fetchFreshWarehouseData(currentLocal);
-
-  // Concurrently wait for real-time relay (MQTT retained message)
-  const relayPromise = new Promise<WarehouseSyncPayload | null>((resolve) => {
-    let resolved = false;
-    const interval = setInterval(() => {
-      if (latestRelayPayload && !resolved) {
-        resolved = true;
-        clearInterval(interval);
-        resolve(currentLocal ? smartMergeWarehouseData(currentLocal, latestRelayPayload) : latestRelayPayload);
-      }
-    }, 150);
-
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        clearInterval(interval);
-        resolve(null);
-      }
-    }, maxWaitMs);
-  });
-
-  const result = await Promise.race([fetchPromise, relayPromise]);
-  if (result) return result;
-
-  // Final check if relay payload arrived during or after race
-  if (latestRelayPayload) {
-    return currentLocal ? smartMergeWarehouseData(currentLocal, latestRelayPayload) : latestRelayPayload;
-  }
-
-  return null;
 }
 
 /**
@@ -1214,20 +988,6 @@ export async function pushWarehouseSync(
   ])).slice(-500);
 
   const allDeletedLoanSet = new Set(deletedLoanIds);
-  const normalizedDeletedLoanSet = new Set<string>();
-  deletedLoanIds.forEach((v) => {
-    if (v) {
-      normalizedDeletedLoanSet.add(String(v).trim());
-      normalizedDeletedLoanSet.add(String(v).toLowerCase().trim());
-    }
-  });
-
-  const deletedUserIds = Array.from(new Set([
-    ...getDeletedUserIds(),
-    ...(payload.deletedUserIds || []),
-  ])).slice(-500);
-
-  const allDeletedUserSet = new Set(deletedUserIds.map((s) => String(s).toLowerCase().trim()));
 
   // Filter out any deleted transaction before saving to ledger or sending
   const filteredTransactions = (payload.transactions || []).filter((trx: any) => {
@@ -1236,25 +996,7 @@ export async function pushWarehouseSync(
 
   // Filter out any deleted loan before sending
   const filteredLoans = (payload.loans || []).filter((l: any) => {
-    if (!l) return false;
-    const id = l.id ? String(l.id).trim() : '';
-    const idLower = l.id ? String(l.id).toLowerCase().trim() : '';
-    const num = l.loanNumber ? String(l.loanNumber).trim() : '';
-    const numLower = l.loanNumber ? String(l.loanNumber).toLowerCase().trim() : '';
-    return (
-      (!id || (!normalizedDeletedLoanSet.has(id) && !normalizedDeletedLoanSet.has(idLower))) &&
-      (!num || (!normalizedDeletedLoanSet.has(num) && !normalizedDeletedLoanSet.has(numLower)))
-    );
-  });
-
-  // Filter out any deleted user before sending
-  const filteredUsers = (payload.users || []).filter((u: any) => {
-    if (!u) return false;
-    const id = u.id ? String(u.id).toLowerCase().trim() : '';
-    const username = u.username ? String(u.username).toLowerCase().trim() : '';
-    if (id && allDeletedUserSet.has(id)) return false;
-    if (username && allDeletedUserSet.has(username)) return false;
-    return true;
+    return !allDeletedLoanSet.has(l.id) && !(l.loanNumber && allDeletedLoanSet.has(l.loanNumber));
   });
 
   // Save each valid transaction to permanent local ledger
@@ -1265,9 +1007,8 @@ export async function pushWarehouseSync(
     transactions: filteredTransactions,
     deletedTransactionIds: deletedIds,
     deletedLoanIds: deletedLoanIds,
-    deletedUserIds: deletedUserIds,
     employees: payload.employees || [],
-    users: filteredUsers,
+    users: payload.users || [],
     loans: filteredLoans,
     auditLogs: (payload.auditLogs || []).slice(0, 50),
     rolePermissions: payload.rolePermissions || {},

@@ -613,7 +613,7 @@ export default function App() {
             const notifBody = `${firstNew.transactionNumber} dari ${firstNew.supplier || 'Vendor'} (${firstNew.items?.length || 0} item)`;
             triggerBrowserNotification(notifTitle, notifBody);
             showToast(`📥 [${firstNew.transactionNumber}] penerimaan barang masuk resmi dicatat di Riwayat Transaksi.`, 'success');
-          } else if (firstNew.type === 'OUT' && firstNew.status === 'COMPLETED') {
+          } else {
             const notifTitle = '📤 Transaksi Barang Keluar Selesai';
             const notifBody = `${firstNew.transactionNumber} untuk ${firstNew.requesterName} (${firstNew.department})`;
             triggerBrowserNotification(notifTitle, notifBody);
@@ -782,8 +782,6 @@ export default function App() {
   };
 
   const handleAddUser = (newUser: UserAccount) => {
-    // Clear any previous tombstone for this user
-    clearDeletedUserTombstone(newUser.id, newUser.username);
     const nextUsers = [newUser, ...users.filter(u => u.id !== newUser.id)];
     setUsers(nextUsers);
     try {
@@ -791,7 +789,7 @@ export default function App() {
     } catch (e) {
       console.error('Save users error', e);
     }
-    syncToCloud({ users: nextUsers, deletedUserIds: getDeletedUserIds() });
+    syncToCloud({ users: nextUsers });
     logAudit('Tambah Akun Pengguna', 'USERS', `Membuat akun ${newUser.fullName} (${newUser.role})`);
     showToast(`Pengguna baru "${newUser.fullName}" berhasil didaftarkan & disinkronkan ke Cloud!`, 'success');
   };
@@ -1340,32 +1338,6 @@ export default function App() {
       if (l.id) removedKeys.push(l.id);
       if (l.loanNumber) removedKeys.push(l.loanNumber);
     });
-
-    // If clearing ALL, also ensure seed and historical loans are permanently tombstoned
-    if (options.scope === 'ALL') {
-      INITIAL_LOANS.forEach((l) => {
-        if (l.id) removedKeys.push(l.id);
-        if (l.loanNumber) removedKeys.push(l.loanNumber);
-      });
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY_LOANS);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((l: any) => {
-              if (l.id) removedKeys.push(l.id);
-              if (l.loanNumber) removedKeys.push(l.loanNumber);
-            });
-          }
-        }
-      } catch {}
-    } else if (options.scope === 'RETURNED') {
-      INITIAL_LOANS.filter((l) => l.status === 'RETURNED').forEach((l) => {
-        if (l.id) removedKeys.push(l.id);
-        if (l.loanNumber) removedKeys.push(l.loanNumber);
-      });
-    }
-
     recordDeletedLoanIds(removedKeys);
     const nextDeletedLoans = getDeletedLoanIds();
     setDeletedLoanIds(nextDeletedLoans);
