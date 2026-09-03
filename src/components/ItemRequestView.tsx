@@ -341,7 +341,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
       (t.requesterName && t.requesterName.toLowerCase().includes(term)) ||
       (t.department && t.department.toLowerCase().includes(term)) ||
       (t.purposeDescription && t.purposeDescription.toLowerCase().includes(term)) ||
-      t.items.some((i) => i.itemName.toLowerCase().includes(term));
+      (t.items || []).some((i) => i.itemName.toLowerCase().includes(term));
 
     const matchesStatus =
       statusFilter === 'ALL' ||
@@ -944,7 +944,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
                         </p>
 
                         <div className="text-[11px] text-slate-700 font-mono">
-                          Barang: {trx.items.map((i) => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ')}
+                          Barang: {(trx.items || []).map((i) => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ')}
                         </div>
                       </div>
 
@@ -1044,7 +1044,7 @@ export const ItemRequestView: React.FC<ItemRequestViewProps> = ({
             <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
               <div>No. Bukti: <strong className="font-mono">{actionTrx.trx.transactionNumber}</strong></div>
               <div>Pemohon: <strong>{actionTrx.trx.requesterName}</strong> ({actionTrx.trx.department})</div>
-              <div>Barang: <strong>{actionTrx.trx.items.map((i) => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ')}</strong></div>
+              <div>Barang: <strong>{(actionTrx.trx.items || []).map((i) => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ')}</strong></div>
             </div>
 
             <div>

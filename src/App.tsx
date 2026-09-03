@@ -133,6 +133,15 @@ export default function App() {
     }));
   };
 
+  // Helper to ensure transactions list always has safe items array
+  const sanitizeTransactionsList = (list: any[]): Transaction[] => {
+    if (!Array.isArray(list)) return [];
+    return list.map((t) => ({
+      ...t,
+      items: Array.isArray(t?.items) ? t.items : [],
+    }));
+  };
+
   // 1. Core items database
   const [items, setItems] = useState<Item[]>(() => {
     try {
@@ -153,22 +162,30 @@ export default function App() {
     try {
       const deletedSet = new Set(getDeletedTransactionIds());
       const saved = localStorage.getItem(STORAGE_KEY_TRANSACTIONS) || localStorage.getItem('ga_warehouse_transactions_v6');
-      const parsed: Transaction[] = saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
-      const ledger = getLocalLedger();
+      const rawParsed = saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+      const parsed: Transaction[] = Array.isArray(rawParsed) ? rawParsed : INITIAL_TRANSACTIONS;
+      const rawLedger = getLocalLedger();
+      const ledger: any[] = Array.isArray(rawLedger) ? rawLedger : [];
       
       const trxMap = new Map<string, Transaction>();
       parsed.forEach((t) => {
-        const key = t.id || t.transactionNumber;
+        const key = t?.id || t?.transactionNumber;
         if (key && !deletedSet.has(t.id) && !(t.transactionNumber && deletedSet.has(t.transactionNumber))) {
-          trxMap.set(key, t);
+          trxMap.set(key, {
+            ...t,
+            items: Array.isArray(t?.items) ? t.items : [],
+          });
         }
       });
       
-      if (ledger && ledger.length > 0) {
+      if (ledger.length > 0) {
         ledger.forEach((t: any) => {
-          const key = t.id || t.transactionNumber;
+          const key = t?.id || t?.transactionNumber;
           if (key && !deletedSet.has(t.id) && !(t.transactionNumber && deletedSet.has(t.transactionNumber)) && !trxMap.has(key)) {
-            trxMap.set(key, t);
+            trxMap.set(key, {
+              ...t,
+              items: Array.isArray(t?.items) ? t.items : [],
+            });
           }
         });
       }
@@ -434,7 +451,7 @@ export default function App() {
     );
 
     if (Array.isArray(merged.items)) setItems(sanitizeItemsList(merged.items));
-    if (Array.isArray(merged.transactions)) setTransactions(merged.transactions);
+    if (Array.isArray(merged.transactions)) setTransactions(sanitizeTransactionsList(merged.transactions));
     if (Array.isArray(merged.deletedTransactionIds)) setDeletedTransactionIds(merged.deletedTransactionIds);
     if (Array.isArray(merged.employees)) setEmployees(merged.employees);
     if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
@@ -1075,7 +1092,7 @@ export default function App() {
     const nowIso = new Date().toISOString();
     // Deduct stock upon actual dispatch
     const nextItems = items.map((item) => {
-      const trxItem = trx.items.find((i) => i.itemId === item.id);
+      const trxItem = (trx.items || []).find((i) => i.itemId === item.id);
       if (trxItem) {
         const newStock = Math.max(0, item.currentStock - trxItem.quantity);
         return { ...item, currentStock: newStock, updatedAt: nowIso };
@@ -1447,14 +1464,15 @@ export default function App() {
                       PRO
                     </span>
                     <button
+                      id="header-cloud-sync-status-btn"
                       type="button"
                       onClick={handleManualRefreshCloud}
                       title={
                         syncState === 'connected'
-                          ? 'Tersinkronisasi Cloud Firestore secara Real-Time. Klik untuk sinkronisasi paksa.'
+                          ? 'Tersinkronisasi Real-Time (PC ↔ Handphone). Klik untuk sinkronisasi paksa.'
                           : syncState === 'syncing'
-                          ? 'Sedang menyimpan perubahan ke Cloud...'
-                          : 'Mode Offline - Klik untuk mencoba menyambungkan ulang ke Cloud'
+                          ? 'Sedang menyinkronkan data antar perangkat...'
+                          : 'Mode Offline - Klik untuk mencoba menyambungkan ulang'
                       }
                       className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                         syncState === 'connected'
@@ -1465,10 +1483,10 @@ export default function App() {
                       }`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full ${
-                        syncState === 'connected' ? 'bg-emerald-400' : syncState === 'syncing' ? 'bg-blue-400' : 'bg-amber-400'
+                        syncState === 'connected' ? 'bg-emerald-400 animate-pulse' : syncState === 'syncing' ? 'bg-blue-400' : 'bg-amber-400'
                       }`} />
                       <span className="hidden sm:inline">
-                        {syncState === 'connected' ? 'Cloud Sync' : syncState === 'syncing' ? 'Syncing...' : 'Lokal'}
+                        {syncState === 'connected' ? 'PC ↔ HP Live' : syncState === 'syncing' ? 'Syncing...' : 'Lokal'}
                       </span>
                       <RefreshCw className={`w-2.5 h-2.5 opacity-75 ml-0.5 ${syncState === 'syncing' ? 'animate-spin' : ''}`} />
                     </button>

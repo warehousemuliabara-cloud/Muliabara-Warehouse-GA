@@ -108,7 +108,7 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
     if (printMode === 'IN') {
       const inItemIds = new Set<string>();
       transactions.filter((t) => t.type === 'IN').forEach((t) => {
-        t.items.forEach((it) => inItemIds.add(it.itemId));
+        (t.items || []).forEach((it) => inItemIds.add(it.itemId));
       });
       if (inItemIds.size > 0) {
         list = items.filter((i) => inItemIds.has(i.id));
@@ -116,7 +116,7 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
     } else if (printMode === 'OUT') {
       const outItemIds = new Set<string>();
       transactions.filter((t) => t.type === 'OUT').forEach((t) => {
-        t.items.forEach((it) => outItemIds.add(it.itemId));
+        (t.items || []).forEach((it) => outItemIds.add(it.itemId));
       });
       if (outItemIds.size > 0) {
         list = items.filter((i) => outItemIds.has(i.id));
@@ -250,7 +250,7 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
               onClick={() => {
                 setPrintMode('IN');
                 const inIds = new Set<string>();
-                transactions.filter((t) => t.type === 'IN').forEach((t) => t.items.forEach((it) => inIds.add(it.itemId)));
+                transactions.filter((t) => t.type === 'IN').forEach((t) => (t.items || []).forEach((it) => inIds.add(it.itemId)));
                 setSelectedIds(Array.from(inIds));
               }}
               className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
@@ -281,7 +281,7 @@ export const BarcodeSheetModal: React.FC<BarcodeSheetModalProps> = ({
               onClick={() => {
                 setPrintMode('OUT');
                 const outIds = new Set<string>();
-                transactions.filter((t) => t.type === 'OUT').forEach((t) => t.items.forEach((it) => outIds.add(it.itemId)));
+                transactions.filter((t) => t.type === 'OUT').forEach((t) => (t.items || []).forEach((it) => outIds.add(it.itemId)));
                 setSelectedIds(Array.from(outIds));
               }}
               className={`p-2.5 sm:p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${

@@ -399,15 +399,15 @@ export async function syncAllWarehouseToGoogleSheets(
     'No. Transaksi', 'Jenis Transaksi', 'Tanggal & Waktu', 'Pemohon / Sumber', 
     'Departemen', 'Status', 'Total Item', 'Daftar Barang & Qty', 'Catatan / Alasan', 'Petugas'
   ];
-  const trxData = payload.transactions.map(t => [
+  const trxData = (payload.transactions || []).map(t => [
     t.transactionNumber,
     t.type === 'IN' ? 'BARANG MASUK' : 'BARANG KELUAR',
     t.timestamp ? new Date(t.timestamp).toLocaleString('id-ID') : (t.dateFormatted || '-'),
     t.requesterName || t.supplier || '-',
     t.department || '-',
     t.status || 'SELESAI',
-    t.items.reduce((sum, it) => sum + it.quantity, 0),
-    t.items.map(it => `${it.itemName} (${it.quantity} ${it.unit})`).join('; '),
+    (t.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0),
+    (t.items || []).map(it => `${it.itemName} (${it.quantity} ${it.unit})`).join('; '),
     t.purposeDescription || t.purpose || t.notes || '-',
     t.dispatchedBy || t.processedBy || t.receivedByOfficer || t.receivedBy || '-'
   ]);
@@ -474,10 +474,10 @@ export async function syncAllWarehouseToGoogleSheets(
     spreadsheetId: activeConfig.id,
     spreadsheetUrl: activeConfig.url,
     syncedCount: {
-      items: payload.items.length,
-      employees: payload.employees.length,
-      transactions: payload.transactions.length,
-      loans: payload.loans.length,
+      items: (payload.items || []).length,
+      employees: (payload.employees || []).length,
+      transactions: (payload.transactions || []).length,
+      loans: (payload.loans || []).length,
     },
   };
 }
@@ -650,15 +650,15 @@ export async function exportFullWarehouseToGoogleSheets(
     'No. Transaksi', 'Jenis Transaksi', 'Tanggal & Waktu', 'Pemohon / Sumber', 
     'Departemen', 'Status', 'Total Item', 'Daftar Barang & Qty', 'Catatan / Alasan', 'Petugas'
   ];
-  const trxData = payload.transactions.map(t => [
+  const trxData = (payload.transactions || []).map(t => [
     t.transactionNumber,
     t.type === 'IN' ? 'BARANG MASUK' : 'BARANG KELUAR',
     t.timestamp ? new Date(t.timestamp).toLocaleString('id-ID') : (t.dateFormatted || '-'),
     t.requesterName || t.supplier || '-',
     t.department || '-',
     t.status || 'SELESAI',
-    t.items.reduce((sum, it) => sum + it.quantity, 0),
-    t.items.map(it => `${it.itemName} (${it.quantity} ${it.unit})`).join('; '),
+    (t.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0),
+    (t.items || []).map(it => `${it.itemName} (${it.quantity} ${it.unit})`).join('; '),
     t.purposeDescription || t.purpose || t.notes || '-',
     t.dispatchedBy || t.processedBy || t.receivedByOfficer || t.receivedBy || '-'
   ]);

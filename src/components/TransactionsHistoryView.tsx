@@ -93,10 +93,10 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
         (trx.supplier && trx.supplier.toLowerCase().includes(term)) ||
         (trx.receivedByOfficer && trx.receivedByOfficer.toLowerCase().includes(term)) ||
         (trx.purposeDescription && trx.purposeDescription.toLowerCase().includes(term)) ||
-        trx.items.some(
+        (trx.items || []).some(
           (i) =>
-            i.itemName.toLowerCase().includes(term) ||
-            i.itemCode.toLowerCase().includes(term)
+            i?.itemName?.toLowerCase().includes(term) ||
+            i?.itemCode?.toLowerCase().includes(term)
         );
 
       let matchDate = true;
@@ -133,7 +133,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
     ];
 
     const rows = filteredTransactions.map((trx) => {
-      const itemsStr = trx.items
+      const itemsStr = (trx.items || [])
         .map((i) => `${i.itemName} (${i.quantity} ${i.unit})`)
         .join('; ');
       return [
@@ -383,9 +383,9 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                 {/* Items List (Full Width, Card Nested) */}
                 <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1 text-xs">
                   <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
-                    Daftar Barang ({trx.items.length}):
+                    Daftar Barang ({(trx.items || []).length}):
                   </span>
-                  {trx.items.map((item, idx) => (
+                  {(trx.items || []).map((item, idx) => (
                     <div key={idx} className="flex items-center justify-between gap-2 text-[11px]">
                       <span className="font-semibold text-slate-800 truncate">{item.itemName}</span>
                       <span
@@ -542,7 +542,7 @@ export const TransactionsHistoryView: React.FC<TransactionsHistoryViewProps> = (
                     {/* Daftar Barang */}
                     <td className="py-3 px-4">
                       <div className="space-y-1 max-w-xs">
-                        {trx.items.map((item, idx) => (
+                        {(trx.items || []).map((item, idx) => (
                           <div key={idx} className="flex items-center justify-between text-xs gap-2">
                             <span className="font-medium text-slate-800 truncate">{item.itemName}</span>
                             <span

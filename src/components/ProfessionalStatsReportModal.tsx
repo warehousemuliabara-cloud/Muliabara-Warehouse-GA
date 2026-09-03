@@ -64,7 +64,7 @@ export const ProfessionalStatsReportModal: React.FC<ProfessionalStatsReportModal
     }
 
     if (selectedCategory !== 'ALL') {
-      const hasCategory = trx.items.some((it) => it.category === selectedCategory);
+      const hasCategory = (trx.items || []).some((it) => it.category === selectedCategory);
       if (!hasCategory) return false;
     }
 
@@ -74,8 +74,8 @@ export const ProfessionalStatsReportModal: React.FC<ProfessionalStatsReportModal
   const inTrxList = filteredTransactions.filter((t) => t.type === 'IN');
   const outTrxList = filteredTransactions.filter((t) => t.type === 'OUT');
 
-  const totalInQty = inTrxList.reduce((acc, t) => acc + t.items.reduce((s, it) => s + (it.quantity || 0), 0), 0);
-  const totalOutQty = outTrxList.reduce((acc, t) => acc + t.items.reduce((s, it) => s + (it.quantity || 0), 0), 0);
+  const totalInQty = inTrxList.reduce((acc, t) => acc + (t.items || []).reduce((s, it) => s + (it.quantity || 0), 0), 0);
+  const totalOutQty = outTrxList.reduce((acc, t) => acc + (t.items || []).reduce((s, it) => s + (it.quantity || 0), 0), 0);
 
   const totalStockItems = items.length;
   const totalPhysicalStock = items.reduce((acc, it) => acc + it.currentStock, 0);
@@ -85,7 +85,7 @@ export const ProfessionalStatsReportModal: React.FC<ProfessionalStatsReportModal
   // Most requested items (Top 5 Items Keluar)
   const itemOutMap: Record<string, { name: string; code: string; unit: string; qty: number }> = {};
   outTrxList.forEach((t) => {
-    t.items.forEach((it) => {
+    (t.items || []).forEach((it) => {
       if (!itemOutMap[it.itemCode]) {
         itemOutMap[it.itemCode] = { name: it.itemName, code: it.itemCode, unit: it.unit, qty: 0 };
       }
@@ -97,7 +97,7 @@ export const ProfessionalStatsReportModal: React.FC<ProfessionalStatsReportModal
   // Most restocked items (Top 5 Items Masuk)
   const itemInMap: Record<string, { name: string; code: string; unit: string; qty: number }> = {};
   inTrxList.forEach((t) => {
-    t.items.forEach((it) => {
+    (t.items || []).forEach((it) => {
       if (!itemInMap[it.itemCode]) {
         itemInMap[it.itemCode] = { name: it.itemName, code: it.itemCode, unit: it.unit, qty: 0 };
       }
@@ -110,7 +110,7 @@ export const ProfessionalStatsReportModal: React.FC<ProfessionalStatsReportModal
   const deptOutMap: Record<string, number> = {};
   outTrxList.forEach((t) => {
     const dept = t.department || 'General Affairs';
-    const totalQty = t.items.reduce((s, it) => s + (it.quantity || 0), 0);
+    const totalQty = (t.items || []).reduce((s, it) => s + (it.quantity || 0), 0);
     deptOutMap[dept] = (deptOutMap[dept] || 0) + totalQty;
   });
   const deptOutList = Object.entries(deptOutMap).sort((a, b) => b[1] - a[1]);
@@ -120,7 +120,7 @@ export const ProfessionalStatsReportModal: React.FC<ProfessionalStatsReportModal
     const rows: string[][] = [];
 
     filteredTransactions.forEach((t) => {
-      t.items.forEach((it) => {
+      (t.items || []).forEach((it) => {
         rows.push([
           t.type === 'IN' ? 'BARANG MASUK' : 'BARANG KELUAR',
           `"${t.transactionNumber}"`,

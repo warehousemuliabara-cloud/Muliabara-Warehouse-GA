@@ -100,8 +100,8 @@ export const Dashboard3DCharts: React.FC<Dashboard3DChartsProps> = ({
     ];
 
     filteredOutTransactions.forEach((trx) => {
-      trx.items.forEach((it) => {
-        grandTotalQty += it.quantity;
+      (trx.items || []).forEach((it) => {
+        grandTotalQty += (Number(it.quantity) || 0);
 
         // Lookup category from master items
         const masterItem = items.find((m) => m.id === it.itemId || m.code === it.itemCode);
@@ -165,7 +165,7 @@ export const Dashboard3DCharts: React.FC<Dashboard3DChartsProps> = ({
     filteredOutTransactions.forEach((trx) => {
       const empName = trx.requesterName || 'Karyawan';
       const dept = trx.department || 'General Affairs (GA)';
-      const trxQty = trx.items.reduce((sum, i) => sum + i.quantity, 0);
+      const trxQty = (trx.items || []).reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
       totalOutflow += trxQty;
 
       // Employee
