@@ -96,9 +96,11 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   // Chart Period Filter ('THIS_MONTH' | 'CUSTOM')
   const [chartPeriod, setChartPeriod] = useState<'THIS_MONTH' | 'CUSTOM'>('THIS_MONTH');
+  const [selectedMonthOffset, setSelectedMonthOffset] = useState<number>(0);
+
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 14);
+    d.setDate(d.getDate() - 7);
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
@@ -141,19 +143,76 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return `${year}-${month}-${day}`;
   };
 
-  // Helper function to extract YYYY-MM-DD from transaction timestamp or date
+  // Helper function to extract YYYY-MM-DD from transaction timestamp or date in user's local timezone
   const getTransactionDateKey = (t: Transaction): string => {
-    const str = t.timestamp || t.date || '';
-    if (!str) return '';
-    const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      return `${match[1]}-${match[2]}-${match[3]}`;
+    // 1. If explicit dateFormatted is DD/MM/YYYY
+    if (t.dateFormatted) {
+      const dmy = String(t.dateFormatted).match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      if (dmy) {
+        return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+      }
     }
-    const parsed = new Date(str);
-    if (!isNaN(parsed.getTime())) {
-      return formatLocalDateKey(parsed);
+    // 2. Try ISO timestamp or date
+    const raw = t.timestamp || t.date || (t as any).createdAt || '';
+    if (raw) {
+      const parsed = new Date(raw);
+      if (!isNaN(parsed.getTime())) {
+        return formatLocalDateKey(parsed);
+      }
+      const match = String(raw).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (match) {
+        return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+      }
     }
     return '';
+  };
+
+  // Helper to extract hour (0-23) from transaction in local timezone
+  const getTransactionHour = (t: Transaction): number => {
+    const raw = t.timestamp || t.date || (t as any).createdAt || '';
+    if (raw) {
+      const parsed = new Date(raw);
+      if (!isNaN(parsed.getTime())) {
+        return parsed.getHours();
+      }
+    }
+    if (t.timeFormatted) {
+      const match = String(t.timeFormatted).match(/^(\d{1,2}):/);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return 12;
+  };
+
+  // Active month descriptor for 'THIS_MONTH'
+  const currentMonthYear = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + selectedMonthOffset);
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    return {
+      key: `${y}-${String(m + 1).padStart(2, '0')}`,
+      year: y,
+      month: m,
+      label: d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
+      isCurrentRealMonth: selectedMonthOffset === 0,
+    };
+  }, [selectedMonthOffset]);
+
+  // Handle custom date pickers with auto-adjustment
+  const handleStartDateChange = (val: string) => {
+    setCustomStartDate(val);
+    if (customEndDate && val > customEndDate) {
+      setCustomEndDate(val);
+    }
+  };
+
+  const handleEndDateChange = (val: string) => {
+    setCustomEndDate(val);
+    if (customStartDate && val < customStartDate) {
+      setCustomStartDate(val);
+    }
   };
 
   // -------------------------------------------------------------
@@ -162,11 +221,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   // -------------------------------------------------------------
   const operationTimeSeriesData = useMemo(() => {
     const dailyMap: Record<string, { dateLabel: string; inQty: number; outQty: number; rawDate: string }> = {};
-    const now = new Date();
     
     if (chartPeriod === 'THIS_MONTH') {
-      const year = now.getFullYear();
-      const month = now.getMonth();
+      const { year, month } = currentMonthYear;
       const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
       
       for (let day = 1; day <= totalDaysInMonth; day++) {
@@ -180,61 +237,112 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           rawDate: isoKey,
         };
       }
-    } else if (chartPeriod === 'CUSTOM') {
-      const start = new Date(customStartDate + 'T00:00:00');
-      const end = new Date(customEndDate + 'T23:59:59');
-      if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
-        const cur = new Date(start);
-        let count = 0;
-        while (cur <= end && count < 365) {
-          count++;
-          const isoKey = formatLocalDateKey(cur);
-          const dateLabel = `${cur.getDate()} ${cur.toLocaleDateString('id-ID', { month: 'short' })}`;
-          dailyMap[isoKey] = {
-            dateLabel,
+
+      // Populate transactions for this month
+      (transactions || []).forEach((t) => {
+        if (t.status === 'REJECTED') return;
+        const txDateStr = getTransactionDateKey(t);
+        if (!txDateStr) return;
+
+        const qtySum = (t.items && t.items.length > 0)
+          ? t.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+          : (Number((t as any).quantity) || 0);
+
+        if (dailyMap[txDateStr]) {
+          if (t.type === 'IN') {
+            dailyMap[txDateStr].inQty += qtySum;
+          } else if (t.type === 'OUT') {
+            dailyMap[txDateStr].outQty += qtySum;
+          }
+        }
+      });
+
+      return Object.values(dailyMap).sort((a, b) => a.rawDate.localeCompare(b.rawDate));
+    } else {
+      // CUSTOM period
+      const isSingleDay = customStartDate === customEndDate;
+
+      if (isSingleDay) {
+        // Generate 12 two-hour intervals across the single selected day
+        const hourlyMap: Record<string, { dateLabel: string; inQty: number; outQty: number; rawDate: string; hourStart: number }> = {};
+        const hours = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22];
+        hours.forEach((h) => {
+          const timeLabel = `${String(h).padStart(2, '0')}:00`;
+          hourlyMap[timeLabel] = {
+            dateLabel: timeLabel,
             inQty: 0,
             outQty: 0,
-            rawDate: isoKey,
+            rawDate: `${customStartDate}T${timeLabel}`,
+            hourStart: h,
           };
-          cur.setDate(cur.getDate() + 1);
-        }
+        });
+
+        (transactions || []).forEach((t) => {
+          if (t.status === 'REJECTED') return;
+          const txDateStr = getTransactionDateKey(t);
+          if (txDateStr !== customStartDate) return;
+
+          const qtySum = (t.items && t.items.length > 0)
+            ? t.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+            : (Number((t as any).quantity) || 0);
+
+          const h = getTransactionHour(t);
+          // Find closest interval
+          const bucketHour = hours.reduce((prev, curr) => (curr <= h ? curr : prev), 0);
+          const key = `${String(bucketHour).padStart(2, '0')}:00`;
+          if (hourlyMap[key]) {
+            if (t.type === 'IN') {
+              hourlyMap[key].inQty += qtySum;
+            } else if (t.type === 'OUT') {
+              hourlyMap[key].outQty += qtySum;
+            }
+          }
+        });
+
+        return Object.values(hourlyMap).sort((a, b) => a.hourStart - b.hourStart);
       } else {
-        const year = now.getFullYear();
-        const month = now.getMonth();
-        const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
-        for (let day = 1; day <= totalDaysInMonth; day++) {
-          const d = new Date(year, month, day);
-          const isoKey = formatLocalDateKey(d);
-          const dateLabel = `${day} ${d.toLocaleDateString('id-ID', { month: 'short' })}`;
-          dailyMap[isoKey] = {
-            dateLabel,
-            inQty: 0,
-            outQty: 0,
-            rawDate: isoKey,
-          };
+        // Multi-day custom range
+        const start = new Date(customStartDate + 'T00:00:00');
+        const end = new Date(customEndDate + 'T23:59:59');
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+          const cur = new Date(start);
+          let count = 0;
+          while (cur <= end && count < 365) {
+            count++;
+            const isoKey = formatLocalDateKey(cur);
+            const dateLabel = `${cur.getDate()} ${cur.toLocaleDateString('id-ID', { month: 'short' })}`;
+            dailyMap[isoKey] = {
+              dateLabel,
+              inQty: 0,
+              outQty: 0,
+              rawDate: isoKey,
+            };
+            cur.setDate(cur.getDate() + 1);
+          }
         }
+
+        (transactions || []).forEach((t) => {
+          if (t.status === 'REJECTED') return;
+          const txDateStr = getTransactionDateKey(t);
+          if (!txDateStr) return;
+
+          const qtySum = (t.items && t.items.length > 0)
+            ? t.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+            : (Number((t as any).quantity) || 0);
+
+          if (dailyMap[txDateStr]) {
+            if (t.type === 'IN') {
+              dailyMap[txDateStr].inQty += qtySum;
+            } else if (t.type === 'OUT') {
+              dailyMap[txDateStr].outQty += qtySum;
+            }
+          }
+        });
+
+        return Object.values(dailyMap).sort((a, b) => a.rawDate.localeCompare(b.rawDate));
       }
     }
-
-    // Populate actual transaction volumes from transactions history
-    (transactions || []).forEach((t) => {
-      if (t.status === 'REJECTED') return;
-      const txDateStr = getTransactionDateKey(t);
-      if (!txDateStr) return;
-
-      const qtySum = (t.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
-
-      if (dailyMap[txDateStr]) {
-        if (t.type === 'IN') {
-          dailyMap[txDateStr].inQty += qtySum;
-        } else if (t.type === 'OUT') {
-          dailyMap[txDateStr].outQty += qtySum;
-        }
-      }
-    });
-
-    return Object.values(dailyMap).sort((a, b) => a.rawDate.localeCompare(b.rawDate));
-  }, [transactions, chartPeriod, customStartDate, customEndDate]);
+  }, [transactions, chartPeriod, customStartDate, customEndDate, currentMonthYear]);
 
   // -------------------------------------------------------------
   // Data for Multi-Dimensional Insights: Category Distribution Donut
@@ -312,35 +420,44 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   // -------------------------------------------------------------
   // Data for SKU Demand Velocity Sparkline
-  // Synchronized with 1-month (4-week) outbound consumption velocity
+  // Synchronized strictly with 1 running month (1 bulan berjalan saja)
   // -------------------------------------------------------------
   const skuSparklineData = useMemo(() => {
     const now = new Date();
-    // 4 weekly buckets for 1 running month (Mgg 1 - Mgg 4)
-    const weeks: { name: string; val: number; dateRange: string }[] = [];
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const monthName = now.toLocaleDateString('id-ID', { month: 'short' });
 
-    for (let w = 3; w >= 0; w--) {
-      const weekStart = new Date(now.getTime() - (w * 7 + 7) * 24 * 60 * 60 * 1000);
-      const weekEnd = new Date(now.getTime() - (w * 7) * 24 * 60 * 60 * 1000);
-      
+    // 4 standard week buckets of the current running month:
+    // Minggu 1 (1-7), Minggu 2 (8-14), Minggu 3 (15-21), Minggu 4 (22-end of month)
+    const weekBuckets = [
+      { name: 'Mgg 1', start: 1, end: 7, label: `1-7 ${monthName}` },
+      { name: 'Mgg 2', start: 8, end: 14, label: `8-14 ${monthName}` },
+      { name: 'Mgg 3', start: 15, end: 21, label: `15-21 ${monthName}` },
+      { name: 'Mgg 4', start: 22, end: daysInMonth, label: `22-${daysInMonth} ${monthName}` },
+    ];
+
+    const weeks = weekBuckets.map((b) => {
       let weekOutflowQty = 0;
       outTransactions.forEach((t) => {
         if (t.status === 'REJECTED') return;
         const txDateStr = getTransactionDateKey(t);
         if (!txDateStr) return;
-        const tDate = new Date(txDateStr + 'T12:00:00');
-        if (tDate >= weekStart && tDate <= weekEnd) {
-          weekOutflowQty += (t.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+        const [y, m, d] = txDateStr.split('-').map(Number);
+        if (y === currentYear && m === currentMonth + 1 && d >= b.start && d <= b.end) {
+          const qtySum = (t.items && t.items.length > 0)
+            ? t.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+            : (Number((t as any).quantity) || 0);
+          weekOutflowQty += qtySum;
         }
       });
-
-      const label = w === 0 ? 'Mgg Ini' : `M-${w}`;
-      weeks.push({
-        name: label,
+      return {
+        name: b.name,
         val: weekOutflowQty,
-        dateRange: `${weekStart.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} - ${weekEnd.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}`,
-      });
-    }
+        dateRange: b.label,
+      };
+    });
 
     return weeks;
   }, [outTransactions]);
@@ -348,21 +465,25 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   // Top fast-moving SKU velocity metric in 1 running month
   const topDemandSKU = useMemo(() => {
     const now = new Date();
-    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
     const itemDemandMap: Record<string, { code: string; name: string; qty: number }> = {};
 
     outTransactions.forEach((t) => {
       if (t.status === 'REJECTED') return;
       const txDateStr = getTransactionDateKey(t);
-      if (txDateStr) {
-        const tDate = new Date(txDateStr + 'T12:00:00');
-        if (tDate < oneMonthAgo) return;
-      }
-      (t.items || []).forEach((it) => {
-        if (!itemDemandMap[it.itemId]) {
-          itemDemandMap[it.itemId] = { code: it.itemCode, name: it.itemName, qty: 0 };
+      if (!txDateStr) return;
+      const [y, m] = txDateStr.split('-').map(Number);
+      // Strictly 1 running month
+      if (y !== currentYear || m !== currentMonth + 1) return;
+
+      const itemsList = t.items && t.items.length > 0 ? t.items : [];
+      itemsList.forEach((it) => {
+        const id = it.itemId || it.itemCode || it.itemName;
+        if (!itemDemandMap[id]) {
+          itemDemandMap[id] = { code: it.itemCode, name: it.itemName, qty: 0 };
         }
-        itemDemandMap[it.itemId].qty += Number(it.quantity) || 0;
+        itemDemandMap[id].qty += Number(it.quantity) || 0;
       });
     });
 
@@ -742,7 +863,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                bulan ini
+                bulan ini {selectedMonthOffset !== 0 ? `(${currentMonthYear.label})` : ''}
               </button>
               <button
                 type="button"
@@ -760,6 +881,48 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             </div>
           </div>
 
+          {/* Month Navigator when "bulan ini" is selected */}
+          {chartPeriod === 'THIS_MONTH' && (
+            <div className="flex items-center justify-between mb-2.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 text-[10.5px] sm:text-[11px] text-slate-700 font-bold">
+                <CalendarDays className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>Periode: <span className="text-blue-700 font-extrabold capitalize">{currentMonthYear.label}</span></span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonthOffset((prev) => prev - 1)}
+                  className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+                  title="Bulan sebelumnya"
+                >
+                  ← Bulan Lalu
+                </button>
+                {selectedMonthOffset !== 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonthOffset(0)}
+                    className="px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                  >
+                    Bulan Berjalan
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonthOffset((prev) => prev + 1)}
+                  disabled={selectedMonthOffset >= 0}
+                  className={`px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors ${
+                    selectedMonthOffset >= 0
+                      ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title="Bulan berikutnya"
+                >
+                  Bulan Depan →
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Custom Date Range Picker (Shown when "pilih tanggal" is active, with lowercase labels) */}
           {chartPeriod === 'CUSTOM' && (
             <div className="flex items-center gap-2 mb-2.5 px-2.5 py-1.5 bg-blue-50/60 border border-blue-100 rounded-xl text-xs flex-wrap animate-in fade-in duration-150">
@@ -772,7 +935,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 <input
                   type="date"
                   value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  onChange={(e) => handleStartDateChange(e.target.value)}
                   className="text-[10.5px] bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
                 />
               </div>
@@ -781,9 +944,51 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 <input
                   type="date"
                   value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  onChange={(e) => handleEndDateChange(e.target.value)}
                   className="text-[10.5px] bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
                 />
+              </div>
+              {/* Quick shortcut pills */}
+              <div className="flex items-center gap-1 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = formatLocalDateKey(new Date());
+                    setCustomStartDate(today);
+                    setCustomEndDate(today);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-[9.5px] bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 font-medium"
+                >
+                  hari ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    const end = formatLocalDateKey(d);
+                    d.setDate(d.getDate() - 6);
+                    const start = formatLocalDateKey(d);
+                    setCustomStartDate(start);
+                    setCustomEndDate(end);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-[9.5px] bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 font-medium"
+                >
+                  7 hari
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = new Date();
+                    const end = formatLocalDateKey(d);
+                    d.setDate(d.getDate() - 29);
+                    const start = formatLocalDateKey(d);
+                    setCustomStartDate(start);
+                    setCustomEndDate(end);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-[9.5px] bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 font-medium"
+                >
+                  30 hari
+                </button>
               </div>
             </div>
           )}

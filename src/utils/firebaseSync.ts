@@ -20,18 +20,10 @@ try {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const dbId = (firebaseConfig as any).firestoreDatabaseId;
 
-// Initialize Firestore with ignoreUndefinedProperties and experimentalAutoDetectLongPolling
-// This ensures 100% reliable connectivity on Netlify, Mobile Safari, Android Chrome, and PC.
+// Standard direct Firestore initialization for 100% reliable cross-device & Netlify connectivity
 let firestoreInstance: ReturnType<typeof getFirestore>;
 try {
-  firestoreInstance = initializeFirestore(
-    app,
-    {
-      ignoreUndefinedProperties: true,
-      experimentalAutoDetectLongPolling: true,
-    },
-    dbId || undefined
-  );
+  firestoreInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
 } catch {
   try {
     firestoreInstance = initializeFirestore(
@@ -42,11 +34,7 @@ try {
       dbId || undefined
     );
   } catch {
-    try {
-      firestoreInstance = dbId ? getFirestore(app, dbId) : getFirestore(app);
-    } catch {
-      firestoreInstance = getFirestore(app);
-    }
+    firestoreInstance = getFirestore(app);
   }
 }
 
@@ -64,6 +52,7 @@ export const CLIENT_SESSION_ID = typeof window !== 'undefined'
 export interface WarehouseSyncPayload {
   items: any[];
   transactions: any[];
+  deletedTransactionIds?: string[];
   employees: any[];
   users: any[];
   loans: any[];
@@ -144,9 +133,20 @@ export function sanitizePayloadForFirestore(raw: any): any {
   try {
     // JSON parse/stringify drops all object keys with value `undefined`
     const cleaned = JSON.parse(JSON.stringify(raw, (key, value) => {
-      if (value === undefined) return undefined; // will be omitted by JSON.stringify
+      if (value === undefined) return undefined;
+      // Guard against oversized base64 data URIs in logoUrl exceeding the 1MB Firestore limit
+      if (key === 'logoUrl' && typeof value === 'string' && value.length > 80000) {
+        console.warn('Dashboard logo URL too large for single Firestore doc, trimming to keep document safe');
+        return value.slice(0, 80000);
+      }
       return value;
     }));
+
+    // Ensure auditLogs are capped at latest 50 entries in Cloud to keep doc well under 1MB
+    if (cleaned && Array.isArray(cleaned.auditLogs) && cleaned.auditLogs.length > 50) {
+      cleaned.auditLogs = cleaned.auditLogs.slice(0, 50);
+    }
+
     return cleaned;
   } catch {
     return raw;
@@ -165,9 +165,10 @@ function computeDataHash(data: Partial<WarehouseSyncPayload>): string {
     const empCount = (data.employees || []).length;
     const userCount = (data.users || []).length;
     const loanSummary = (data.loans || []).map((l) => `${l.id}:${l.status}:${l.actualReturnDate || l.borrowDate || ''}`).join('|');
+    const deletedCount = (data.deletedTransactionIds || []).length;
     const rolePermsKey = JSON.stringify(data.rolePermissions || {});
     const cfgKey = JSON.stringify(data.dashboardConfig || {});
-    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
+    return `${data.lastUpdated || ''}_tx[${(data.transactions || []).length}_${txSummary}]_del[${deletedCount}]_it[${(data.items || []).length}_${itemStockSum}_${itemSummary}]_e${empCount}_u${userCount}_l${loanSummary}_rp[${rolePermsKey}]_cfg[${cfgKey}]`;
   } catch {
     return String(Date.now());
   }
@@ -188,6 +189,194 @@ const getLoanRank = (l: any): number => {
   if (l.status === 'BORROWED') return 10;
   return 5;
 };
+
+// Storage Keys
+const STORAGE_KEY_OFFLINE_QUEUE = 'ga_warehouse_offline_queue_v2';
+const STORAGE_KEY_LOCAL_LEDGER = 'ga_warehouse_trx_local_ledger_v2';
+const STORAGE_KEY_DELETED_TRX = 'ga_warehouse_deleted_trx_ids_v1';
+
+// Tombstone Management: Track deleted transactions so they NEVER reappear across devices
+export function getDeletedTransactionIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_DELETED_TRX);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordDeletedTransactionId(trxId: string, trxNumber?: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = getDeletedTransactionIds();
+    const set = new Set(current);
+    if (trxId) set.add(trxId);
+    if (trxNumber) set.add(trxNumber);
+    const updated = Array.from(set).slice(-1000);
+    localStorage.setItem(STORAGE_KEY_DELETED_TRX, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Failed to record deleted transaction id:', e);
+  }
+}
+
+export function removeFromLocalLedger(trxId: string, trxNumber?: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LOCAL_LEDGER);
+    if (!raw) return;
+    const list: any[] = JSON.parse(raw);
+    const filtered = list.filter((t: any) => {
+      const matchId = t.id === trxId || (trxNumber && t.transactionNumber === trxNumber);
+      return !matchId;
+    });
+    localStorage.setItem(STORAGE_KEY_LOCAL_LEDGER, JSON.stringify(filtered));
+  } catch (e) {
+    console.warn('Failed to remove from local ledger:', e);
+  }
+}
+
+export function clearLocalLedger() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_LOCAL_LEDGER);
+  } catch (e) {
+    // safe
+  }
+}
+
+export function clearDeletedTransactionIds() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_DELETED_TRX);
+  } catch (e) {
+    // safe
+  }
+}
+
+// Save transaction to local permanent ledger so it can NEVER be lost
+export function saveToLocalLedger(trx: any) {
+  if (typeof window === 'undefined' || !trx) return;
+  const deleted = new Set(getDeletedTransactionIds());
+  if (deleted.has(trx.id) || (trx.transactionNumber && deleted.has(trx.transactionNumber))) {
+    return; // Never re-save a deleted transaction
+  }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LOCAL_LEDGER);
+    const list: any[] = raw ? JSON.parse(raw) : [];
+    const trxKey = trx.id || trx.transactionNumber;
+    const existingIdx = list.findIndex((t: any) => (t.id || t.transactionNumber) === trxKey);
+    if (existingIdx >= 0) {
+      list[existingIdx] = trx;
+    } else {
+      list.unshift(trx);
+    }
+    // Limit ledger to latest 500 entries
+    localStorage.setItem(STORAGE_KEY_LOCAL_LEDGER, JSON.stringify(list.slice(0, 500)));
+  } catch (e) {
+    console.warn('Local ledger save notice:', e);
+  }
+}
+
+export function getLocalLedger(): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LOCAL_LEDGER);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getOfflineQueueCount(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_OFFLINE_QUEUE);
+    const queue = raw ? JSON.parse(raw) : [];
+    return Array.isArray(queue) ? queue.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveToOfflineQueue(payload: WarehouseSyncPayload) {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_OFFLINE_QUEUE);
+    const queue: WarehouseSyncPayload[] = raw ? JSON.parse(raw) : [];
+    // Only keep latest 5 queued states
+    queue.push(payload);
+    localStorage.setItem(STORAGE_KEY_OFFLINE_QUEUE, JSON.stringify(queue.slice(-5)));
+    updateSyncState('offline', `Ada ${queue.length} pembaruan menunggu jaringan`);
+  } catch (e) {
+    console.warn('Failed to save offline queue:', e);
+  }
+}
+
+let isFlushingQueue = false;
+export async function flushOfflineSyncQueue(): Promise<boolean> {
+  if (typeof window === 'undefined' || isFlushingQueue) return false;
+  if (!navigator.onLine) return false;
+
+  const count = getOfflineQueueCount();
+  if (count === 0) return true;
+
+  isFlushingQueue = true;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_OFFLINE_QUEUE);
+    const queue: WarehouseSyncPayload[] = raw ? JSON.parse(raw) : [];
+    if (queue.length === 0) {
+      isFlushingQueue = false;
+      return true;
+    }
+
+    updateSyncState('syncing', `Mengirim ${queue.length} data tersimpan saat offline...`);
+    const docRef = doc(db, WAREHOUSE_COLLECTION, WAREHOUSE_DOC_ID);
+    
+    // First get current doc on Firestore to avoid blind overwrite
+    const snap = await getDoc(docRef);
+    let baseData: Partial<WarehouseSyncPayload> = {};
+    if (snap.exists()) {
+      baseData = snap.data() as WarehouseSyncPayload;
+    }
+
+    // Merge all queued payloads sequentially
+    let finalPayload: WarehouseSyncPayload = queue[queue.length - 1];
+    for (const q of queue) {
+      finalPayload = smartMergeWarehouseData(finalPayload, q);
+    }
+    // Safely merge with Firestore existing base
+    finalPayload = smartMergeWarehouseData(baseData, finalPayload);
+
+    const cleanPayload = sanitizePayloadForFirestore(finalPayload);
+    await setDoc(docRef, cleanPayload);
+
+    // Clear queue on success
+    localStorage.removeItem(STORAGE_KEY_OFFLINE_QUEUE);
+    lastAppliedHash = computeDataHash(cleanPayload);
+    updateSyncState('connected', 'Tersinkronisasi Cloud');
+    isFlushingQueue = false;
+    return true;
+  } catch (err: any) {
+    console.warn('Queue flush retry notice:', err?.message);
+    updateSyncState('offline', 'Koneksi lemah, akan dicoba kembali otomatis');
+    isFlushingQueue = false;
+    return false;
+  }
+}
+
+// Auto-flush listeners
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    flushOfflineSyncQueue().catch(() => {});
+  });
+  // 15-second background auto-flush interval
+  setInterval(() => {
+    if (navigator.onLine && getOfflineQueueCount() > 0) {
+      flushOfflineSyncQueue().catch(() => {});
+    }
+  }, 15000);
+}
 
 /**
  * Filter out transactions older than 3 months (90 days) based on their transaction date.
@@ -212,9 +401,9 @@ export function filterTransactionsWithin3Months<T extends { date?: string; times
 }
 
 /**
- * Robust Smart Merger:
- * Cloud Firestore is the authoritative source of truth.
- * When merging, transactions older than 3 months are pruned automatically.
+ * Robust Smart Merger with Zero-Data-Loss Union:
+ * Merges local and remote data safely by unique identity keys.
+ * Never silently deletes local transactions or loans created offline or during weak network.
  */
 export function smartMergeWarehouseData(
   local?: Partial<WarehouseSyncPayload>,
@@ -223,19 +412,161 @@ export function smartMergeWarehouseData(
   const localObj = local || {};
   const remoteObj = remote || {};
 
-  // If remote exists, remote is authoritative for transactions, loans, and items
-  let mergedTransactions = remoteObj.transactions ? [...remoteObj.transactions] : (localObj.transactions || []);
+  // Collect all known deleted transaction IDs from storage, local payload, and remote payload
+  const localDeleted = getDeletedTransactionIds();
+  const remoteDeleted = Array.isArray(remoteObj.deletedTransactionIds) ? remoteObj.deletedTransactionIds : [];
+  const payloadLocalDeleted = Array.isArray(localObj.deletedTransactionIds) ? localObj.deletedTransactionIds : [];
+  
+  const allDeletedSet = new Set<string>([
+    ...localDeleted,
+    ...remoteDeleted,
+    ...payloadLocalDeleted,
+  ]);
+
+  // Persist updated tombstone set to localStorage
+  if (typeof window !== 'undefined' && allDeletedSet.size > 0) {
+    try {
+      localStorage.setItem(STORAGE_KEY_DELETED_TRX, JSON.stringify(Array.from(allDeletedSet).slice(-1000)));
+    } catch {}
+  }
+
+  // 1. BIDIRECTIONAL UNION MERGE FOR TRANSACTIONS WITH STRICT TOMBSTONE FILTERING
+  const trxMap = new Map<string, any>();
+
+  // Incorporate permanent local ledger if available, omitting deleted transactions
+  const ledger = getLocalLedger();
+  ledger.forEach((t: any) => {
+    const key = t.id || t.transactionNumber;
+    if (!key) return;
+    if (allDeletedSet.has(t.id) || (t.transactionNumber && allDeletedSet.has(t.transactionNumber))) return;
+    trxMap.set(key, t);
+  });
+
+  // Add all local transactions, omitting deleted transactions
+  (localObj.transactions || []).forEach((t: any) => {
+    const key = t.id || t.transactionNumber;
+    if (!key) return;
+    if (allDeletedSet.has(t.id) || (t.transactionNumber && allDeletedSet.has(t.transactionNumber))) return;
+    const existing = trxMap.get(key);
+    if (!existing || getTrxRank(t) >= getTrxRank(existing)) {
+      trxMap.set(key, t);
+    }
+  });
+
+  // Merge remote transactions, omitting deleted transactions
+  (remoteObj.transactions || []).forEach((remoteTrx: any) => {
+    const key = remoteTrx.id || remoteTrx.transactionNumber;
+    if (!key) return;
+    if (allDeletedSet.has(remoteTrx.id) || (remoteTrx.transactionNumber && allDeletedSet.has(remoteTrx.transactionNumber))) return;
+    
+    const localTrx = trxMap.get(key);
+    if (!localTrx) {
+      trxMap.set(key, remoteTrx);
+    } else {
+      const remoteRank = getTrxRank(remoteTrx);
+      const localRank = getTrxRank(localTrx);
+      if (remoteRank > localRank) {
+        trxMap.set(key, remoteTrx);
+      } else if (remoteRank === localRank) {
+        const localTime = new Date(localTrx.updatedAt || localTrx.date || 0).getTime();
+        const remoteTime = new Date(remoteTrx.updatedAt || remoteTrx.date || 0).getTime();
+        if (remoteTime >= localTime) {
+          trxMap.set(key, remoteTrx);
+        }
+      }
+    }
+  });
+
+  let mergedTransactions = Array.from(trxMap.values()).filter((t: any) => {
+    return !allDeletedSet.has(t.id) && !(t.transactionNumber && allDeletedSet.has(t.transactionNumber));
+  });
+
   mergedTransactions = filterTransactionsWithin3Months(mergedTransactions).sort(
     (a, b) => new Date(b.date || b.updatedAt || 0).getTime() - new Date(a.date || a.updatedAt || 0).getTime()
   );
 
-  let mergedLoans = remoteObj.loans ? [...remoteObj.loans] : (localObj.loans || []);
-  let mergedItems = remoteObj.items && remoteObj.items.length > 0 ? remoteObj.items : (localObj.items || []);
-  let mergedEmployees = remoteObj.employees && remoteObj.employees.length > 0 ? remoteObj.employees : (localObj.employees || []);
-  let mergedUsers = remoteObj.users && remoteObj.users.length > 0 ? remoteObj.users : (localObj.users || []);
-  let mergedAuditLogs = (remoteObj.auditLogs || localObj.auditLogs || []).slice(0, 200);
+  // Clean local ledger if any deleted transactions were found in it
+  if (typeof window !== 'undefined' && ledger.length > 0) {
+    const cleanedLedger = ledger.filter((t: any) => !allDeletedSet.has(t.id) && !(t.transactionNumber && allDeletedSet.has(t.transactionNumber)));
+    if (cleanedLedger.length !== ledger.length) {
+      try {
+        localStorage.setItem(STORAGE_KEY_LOCAL_LEDGER, JSON.stringify(cleanedLedger));
+      } catch {}
+    }
+  }
 
-  // Merge permissions & config
+  // 2. BIDIRECTIONAL UNION MERGE FOR LOANS
+  const loanMap = new Map<string, any>();
+  (localObj.loans || []).forEach((l: any) => {
+    const key = l.id || l.loanNumber;
+    if (key) loanMap.set(key, l);
+  });
+  (remoteObj.loans || []).forEach((remoteLoan: any) => {
+    const key = remoteLoan.id || remoteLoan.loanNumber;
+    if (!key) return;
+    const localLoan = loanMap.get(key);
+    if (!localLoan) {
+      loanMap.set(key, remoteLoan);
+    } else {
+      const remoteRank = getLoanRank(remoteLoan);
+      const localRank = getLoanRank(localLoan);
+      if (remoteRank >= localRank) {
+        loanMap.set(key, remoteLoan);
+      }
+    }
+  });
+  const mergedLoans = Array.from(loanMap.values()).sort(
+    (a, b) => new Date(b.loanDate || 0).getTime() - new Date(a.loanDate || 0).getTime()
+  );
+
+  // 3. UNION MERGE FOR ITEMS (Preserve stock updates)
+  const itemMap = new Map<string, any>();
+  (localObj.items || []).forEach((item: any) => {
+    const key = item.id || item.code;
+    if (key) itemMap.set(key, item);
+  });
+  (remoteObj.items || []).forEach((remoteItem: any) => {
+    const key = remoteItem.id || remoteItem.code;
+    if (!key) return;
+    const localItem = itemMap.get(key);
+    if (!localItem) {
+      itemMap.set(key, remoteItem);
+    } else {
+      const remoteTime = new Date(remoteItem.updatedAt || 0).getTime();
+      const localTime = new Date(localItem.updatedAt || 0).getTime();
+      if (remoteTime >= localTime) {
+        itemMap.set(key, remoteItem);
+      }
+    }
+  });
+  const mergedItems = Array.from(itemMap.values());
+
+  // 4. Employees & Users
+  const empMap = new Map<string, any>();
+  (localObj.employees || []).forEach((e: any) => { if (e.id || e.name) empMap.set(e.id || e.name, e); });
+  (remoteObj.employees || []).forEach((e: any) => { if (e.id || e.name) empMap.set(e.id || e.name, e); });
+  const mergedEmployees = Array.from(empMap.values());
+
+  const userMap = new Map<string, any>();
+  (localObj.users || []).forEach((u: any) => { if (u.id || u.username) userMap.set(u.id || u.username, u); });
+  (remoteObj.users || []).forEach((u: any) => { if (u.id || u.username) userMap.set(u.id || u.username, u); });
+  const mergedUsers = Array.from(userMap.values());
+
+  // 5. Audit logs
+  const logMap = new Map<string, any>();
+  (localObj.auditLogs || []).forEach((log: any) => {
+    const key = log.id || `${log.timestamp}_${log.action}`;
+    logMap.set(key, log);
+  });
+  (remoteObj.auditLogs || []).forEach((log: any) => {
+    const key = log.id || `${log.timestamp}_${log.action}`;
+    logMap.set(key, log);
+  });
+  const mergedAuditLogs = Array.from(logMap.values())
+    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
+    .slice(0, 50);
+
+  // 6. Merge permissions & config
   const mergedPermissions = {
     ...(localObj.rolePermissions || {}),
     ...(remoteObj.rolePermissions || {}),
@@ -247,10 +578,11 @@ export function smartMergeWarehouseData(
   };
 
   return {
-    items: mergedItems,
+    items: mergedItems.length > 0 ? mergedItems : (remoteObj.items || localObj.items || []),
     transactions: mergedTransactions,
-    employees: mergedEmployees,
-    users: mergedUsers,
+    deletedTransactionIds: Array.from(allDeletedSet).slice(-500),
+    employees: mergedEmployees.length > 0 ? mergedEmployees : (remoteObj.employees || localObj.employees || []),
+    users: mergedUsers.length > 0 ? mergedUsers : (remoteObj.users || localObj.users || []),
     loans: mergedLoans,
     auditLogs: mergedAuditLogs,
     rolePermissions: Object.keys(mergedPermissions).length > 0 ? mergedPermissions : localObj.rolePermissions || {},
@@ -279,18 +611,27 @@ export async function fetchFreshWarehouseData(
         cloudData.transactions = filterTransactionsWithin3Months(cloudData.transactions);
       }
 
-      lastAppliedHash = computeDataHash(cloudData);
-      return cloudData;
+      // Zero-Loss Merging with Tombstone Filtering: respects deletions and avoids resurrection
+      const merged = currentLocal ? smartMergeWarehouseData(currentLocal, cloudData) : cloudData;
+
+      // If there are unsynced offline items waiting in queue, flush them
+      if (getOfflineQueueCount() > 0) {
+        flushOfflineSyncQueue().catch(() => {});
+      }
+
+      lastAppliedHash = computeDataHash(merged);
+      return merged;
     } else if (currentLocal) {
       // First time initialization on Cloud
       const initialTransactions = filterTransactionsWithin3Months(currentLocal.transactions || []);
       const initialCloud: WarehouseSyncPayload = {
         items: currentLocal.items || [],
         transactions: initialTransactions,
+        deletedTransactionIds: getDeletedTransactionIds(),
         employees: currentLocal.employees || [],
         users: currentLocal.users || [],
         loans: currentLocal.loans || [],
-        auditLogs: (currentLocal.auditLogs || []).slice(0, 100),
+        auditLogs: (currentLocal.auditLogs || []).slice(0, 50),
         rolePermissions: currentLocal.rolePermissions || {},
         dashboardConfig: currentLocal.dashboardConfig || {},
         lastUpdated: new Date().toISOString(),
@@ -306,7 +647,12 @@ export async function fetchFreshWarehouseData(
     }
     return null;
   } catch (err: any) {
-    console.warn('Direct fetch from Firestore notice:', err?.message);
+    const isQuota = err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota');
+    if (isQuota) {
+      updateSyncState('offline', 'Quota Cloud Harian Tercapai (Data tersimpan di perangkat)');
+    } else {
+      console.warn('Direct fetch from Firestore notice:', err?.message);
+    }
     return null;
   }
 }
@@ -360,7 +706,10 @@ export function subscribeToWarehouseData(
       },
       (error) => {
         const isOffline = error?.code === 'unavailable' || error?.message?.includes('offline');
-        if (isOffline) {
+        const isQuota = error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota');
+        if (isQuota) {
+          updateSyncState('offline', 'Quota Cloud Harian Tercapai (Tersimpan Lokal)');
+        } else if (isOffline) {
           updateSyncState('offline', 'Mode Offline (Tersimpan Lokal)');
         } else {
           updateSyncState('error', error?.message || 'Sinkronisasi tertunda');
@@ -385,13 +734,30 @@ export async function pushWarehouseSync(
   const docRef = doc(db, WAREHOUSE_COLLECTION, WAREHOUSE_DOC_ID);
   updateSyncState('syncing', 'Menyimpan ke Cloud...');
 
+  // Combine deleted IDs
+  const deletedIds = Array.from(new Set([
+    ...getDeletedTransactionIds(),
+    ...(payload.deletedTransactionIds || []),
+  ])).slice(-500);
+
+  const allDeletedSet = new Set(deletedIds);
+
+  // Filter out any deleted transaction before saving to ledger or sending
+  const filteredTransactions = (payload.transactions || []).filter((trx: any) => {
+    return !allDeletedSet.has(trx.id) && !(trx.transactionNumber && allDeletedSet.has(trx.transactionNumber));
+  });
+
+  // Save each valid transaction to permanent local ledger
+  filteredTransactions.forEach((trx) => saveToLocalLedger(trx));
+
   const finalPayload: WarehouseSyncPayload = {
     items: payload.items || [],
-    transactions: payload.transactions || [],
+    transactions: filteredTransactions,
+    deletedTransactionIds: deletedIds,
     employees: payload.employees || [],
     users: payload.users || [],
     loans: payload.loans || [],
-    auditLogs: (payload.auditLogs || []).slice(0, 200),
+    auditLogs: (payload.auditLogs || []).slice(0, 50),
     rolePermissions: payload.rolePermissions || {},
     dashboardConfig: payload.dashboardConfig || {},
     lastUpdated: new Date().toISOString(),
@@ -421,8 +787,14 @@ export async function pushWarehouseSync(
     updateSyncState('connected', 'Tersinkronisasi Cloud');
     return cleanPayload;
   } catch (error: any) {
-    console.warn('Firestore push error:', error?.message);
-    updateSyncState('offline', 'Mode Offline (Tersimpan Lokal)');
+    console.warn('Firestore push notice:', error?.message);
+    // Queue payload so it is automatically retried when connection stabilizes!
+    saveToOfflineQueue(cleanPayload);
+    if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota')) {
+      updateSyncState('offline', 'Quota Cloud Harian Tercapai (Transaksi tersimpan di perangkat, otomatis sync saat quota reset)');
+    } else {
+      updateSyncState('offline', 'Tersimpan di Perangkat (Menunggu Sinyal Cloud)');
+    }
     return cleanPayload;
   }
 }

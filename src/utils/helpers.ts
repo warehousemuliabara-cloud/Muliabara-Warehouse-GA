@@ -196,6 +196,7 @@ export function detectCategoryFromName(name: string): string {
     lower.includes('peluit') ||
     lower.includes('jersey') ||
     lower.includes('olahraga') ||
+    lower.includes('olah raga') ||
     lower.includes('sport') ||
     lower.includes('gawang') ||
     lower.includes('ring basket') ||

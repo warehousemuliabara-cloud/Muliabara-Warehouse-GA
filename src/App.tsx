@@ -81,6 +81,15 @@ import {
   subscribeToCrossTabSync,
   smartMergeWarehouseData,
   onSyncStatusChange, 
+  saveToLocalLedger,
+  getLocalLedger,
+  getOfflineQueueCount,
+  flushOfflineSyncQueue,
+  getDeletedTransactionIds,
+  recordDeletedTransactionId,
+  removeFromLocalLedger,
+  clearLocalLedger,
+  clearDeletedTransactionIds,
   SyncState,
   WarehouseSyncPayload 
 } from './utils/firebaseSync';
@@ -134,11 +143,36 @@ export default function App() {
     }
   });
 
-  // 2. Transactions log
+  // Deleted transaction tombstones
+  const [deletedTransactionIds, setDeletedTransactionIds] = useState<string[]>(() => {
+    return getDeletedTransactionIds();
+  });
+
+  // 2. Transactions log (Safely initialized, combined with permanent local ledger, strictly filtered by tombstones)
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     try {
+      const deletedSet = new Set(getDeletedTransactionIds());
       const saved = localStorage.getItem(STORAGE_KEY_TRANSACTIONS) || localStorage.getItem('ga_warehouse_transactions_v6');
-      return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+      const parsed: Transaction[] = saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
+      const ledger = getLocalLedger();
+      
+      const trxMap = new Map<string, Transaction>();
+      parsed.forEach((t) => {
+        const key = t.id || t.transactionNumber;
+        if (key && !deletedSet.has(t.id) && !(t.transactionNumber && deletedSet.has(t.transactionNumber))) {
+          trxMap.set(key, t);
+        }
+      });
+      
+      if (ledger && ledger.length > 0) {
+        ledger.forEach((t: any) => {
+          const key = t.id || t.transactionNumber;
+          if (key && !deletedSet.has(t.id) && !(t.transactionNumber && deletedSet.has(t.transactionNumber)) && !trxMap.has(key)) {
+            trxMap.set(key, t);
+          }
+        });
+      }
+      return Array.from(trxMap.values());
     } catch {
       return INITIAL_TRANSACTIONS;
     }
@@ -327,6 +361,7 @@ export default function App() {
   const latestStateRef = useRef({
     items,
     transactions,
+    deletedTransactionIds,
     employees,
     users,
     loans,
@@ -340,6 +375,7 @@ export default function App() {
     latestStateRef.current = {
       items,
       transactions,
+      deletedTransactionIds,
       employees,
       users,
       loans,
@@ -348,7 +384,7 @@ export default function App() {
       dashboardConfig,
       currentUser,
     };
-  }, [items, transactions, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser]);
+  }, [items, transactions, deletedTransactionIds, employees, users, loans, auditLogs, rolePermissions, dashboardConfig, currentUser]);
 
   // Helper to immediately push authoritative state to Cloud Firestore
   const syncToCloud = (overrides?: Partial<WarehouseSyncPayload>) => {
@@ -356,6 +392,7 @@ export default function App() {
     const payload: Partial<WarehouseSyncPayload> & { updatedBy: string } = {
       items: overrides?.items !== undefined ? overrides.items : current.items,
       transactions: overrides?.transactions !== undefined ? overrides.transactions : current.transactions,
+      deletedTransactionIds: overrides?.deletedTransactionIds !== undefined ? overrides.deletedTransactionIds : current.deletedTransactionIds,
       employees: overrides?.employees !== undefined ? overrides.employees : current.employees,
       users: overrides?.users !== undefined ? overrides.users : current.users,
       loans: overrides?.loans !== undefined ? overrides.loans : current.loans,
@@ -369,14 +406,56 @@ export default function App() {
     });
   };
 
+  // Offline queue indicator state
+  const [offlineQueueLength, setOfflineQueueLength] = useState<number>(() => getOfflineQueueCount());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOfflineQueueLength(getOfflineQueueCount());
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Robust Zero-Loss Cloud Data Applicator
+  const applySafeCloudData = (cloudData: Partial<WarehouseSyncPayload>) => {
+    const current = latestStateRef.current;
+    const merged = smartMergeWarehouseData(
+      {
+        items: current.items,
+        transactions: current.transactions,
+        deletedTransactionIds: current.deletedTransactionIds,
+        employees: current.employees,
+        users: current.users,
+        loans: current.loans,
+        auditLogs: current.auditLogs,
+        rolePermissions: current.rolePermissions,
+        dashboardConfig: current.dashboardConfig,
+      },
+      cloudData
+    );
+
+    if (Array.isArray(merged.items)) setItems(sanitizeItemsList(merged.items));
+    if (Array.isArray(merged.transactions)) setTransactions(merged.transactions);
+    if (Array.isArray(merged.deletedTransactionIds)) setDeletedTransactionIds(merged.deletedTransactionIds);
+    if (Array.isArray(merged.employees)) setEmployees(merged.employees);
+    if (Array.isArray(merged.users)) setUsers(sanitizeUsersList(merged.users));
+    if (Array.isArray(merged.loans)) setLoans(merged.loans);
+    if (Array.isArray(merged.auditLogs)) setAuditLogs(merged.auditLogs);
+    if (merged.rolePermissions) setRolePermissions(merged.rolePermissions);
+    if (merged.dashboardConfig) setDashboardConfig(merged.dashboardConfig);
+    isInitialCloudLoaded.current = true;
+    return merged;
+  };
+
   // Manual refresh from Cloud button handler (Bidirectional smart merge so nothing is ever lost)
   const handleManualRefreshCloud = async () => {
     showToast('Menghubungkan & menyinkronkan data Cloud Firestore...', 'info');
     try {
+      await flushOfflineSyncQueue();
       const current = latestStateRef.current;
       const cloudData = await fetchFreshWarehouseData({
         items: current.items,
         transactions: current.transactions,
+        deletedTransactionIds: current.deletedTransactionIds,
         employees: current.employees,
         users: current.users,
         loans: current.loans,
@@ -385,17 +464,10 @@ export default function App() {
         dashboardConfig: current.dashboardConfig,
       });
       if (cloudData) {
-        if (Array.isArray(cloudData.items)) setItems(cloudData.items);
-        if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
-        if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
-        if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
-        if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
-        if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
-        if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
-        if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
-        isInitialCloudLoaded.current = true;
+        const merged = applySafeCloudData(cloudData);
+        setOfflineQueueLength(getOfflineQueueCount());
         showToast(
-          `Sinkronisasi Cloud berhasil! ${cloudData.transactions?.length || 0} transaksi & ${cloudData.items?.length || 0} barang tersinkronisasi aman.`,
+          `Sinkronisasi Cloud berhasil! ${merged.transactions?.length || 0} transaksi & ${merged.items?.length || 0} barang tersinkronisasi aman.`,
           'success'
         );
       } else {
@@ -418,24 +490,19 @@ export default function App() {
   useEffect(() => {
     const unsubscribeCrossTab = subscribeToCrossTabSync((incomingData) => {
       if (incomingData) {
-        if (Array.isArray(incomingData.items)) setItems(sanitizeItemsList(incomingData.items));
-        if (Array.isArray(incomingData.transactions)) setTransactions(incomingData.transactions);
-        if (Array.isArray(incomingData.employees)) setEmployees(incomingData.employees);
-        if (Array.isArray(incomingData.users)) setUsers(sanitizeUsersList(incomingData.users));
-        if (Array.isArray(incomingData.loans)) setLoans(incomingData.loans);
-        if (Array.isArray(incomingData.auditLogs)) setAuditLogs(incomingData.auditLogs);
-        if (incomingData.rolePermissions) setRolePermissions(incomingData.rolePermissions);
-        if (incomingData.dashboardConfig) setDashboardConfig(incomingData.dashboardConfig);
+        applySafeCloudData(incomingData);
       }
     });
 
     // Initial cloud fetch on startup to establish connection & pull/merge latest cloud transactions
     const initStartupSync = async () => {
       try {
+        await flushOfflineSyncQueue();
         const current = latestStateRef.current;
         const cloudData = await fetchFreshWarehouseData({
           items: current.items,
           transactions: current.transactions,
+          deletedTransactionIds: current.deletedTransactionIds,
           employees: current.employees,
           users: current.users,
           loans: current.loans,
@@ -444,16 +511,9 @@ export default function App() {
           dashboardConfig: current.dashboardConfig,
         });
         if (cloudData) {
-          if (Array.isArray(cloudData.items)) setItems(sanitizeItemsList(cloudData.items));
-          if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
-          if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
-          if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
-          if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
-          if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
-          if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
-          if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
+          applySafeCloudData(cloudData);
+          setOfflineQueueLength(getOfflineQueueCount());
         }
-        isInitialCloudLoaded.current = true;
       } catch (e) {
         console.warn('Initial cloud sync notice:', e);
       }
@@ -506,16 +566,9 @@ export default function App() {
           showToast(`✅ Permintaan [${firstApproved.transactionNumber}] telah disetujui!`, 'success');
         }
 
-        // Unconditionally update all React state so laptop/phone displays fresh data immediately
-        if (Array.isArray(cloudData.items)) setItems(sanitizeItemsList(cloudData.items));
-        if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
-        if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
-        if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
-        if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
-        if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
-        if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
-        if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
-        isInitialCloudLoaded.current = true;
+        // Apply with safe union merge
+        applySafeCloudData(cloudData);
+        setOfflineQueueLength(getOfflineQueueCount());
       }
     });
 
@@ -597,14 +650,22 @@ export default function App() {
     }
   }, [rolePermissions]);
 
-  // Handle Mobile / Cross-Device Reconnect & Active Heartbeat Sync
+  // Handle Mobile / Cross-Device Reconnect on tab focus and network restoration
   useEffect(() => {
+    let lastRefreshTime = 0;
     const triggerSyncRefresh = () => {
+      // Debounce to at most once per 20 seconds on focus/online
+      const now = Date.now();
+      if (now - lastRefreshTime < 20000) return;
+      lastRefreshTime = now;
+
       if (document.visibilityState === 'visible' && navigator.onLine) {
+        flushOfflineSyncQueue().catch(() => {});
         const current = latestStateRef.current;
         fetchFreshWarehouseData({
           items: current.items,
           transactions: current.transactions,
+          deletedTransactionIds: current.deletedTransactionIds,
           employees: current.employees,
           users: current.users,
           loans: current.loans,
@@ -613,14 +674,8 @@ export default function App() {
           dashboardConfig: current.dashboardConfig,
         }).then((cloudData) => {
           if (cloudData) {
-            if (Array.isArray(cloudData.items)) setItems(sanitizeItemsList(cloudData.items));
-            if (Array.isArray(cloudData.transactions)) setTransactions(cloudData.transactions);
-            if (Array.isArray(cloudData.employees)) setEmployees(cloudData.employees);
-            if (Array.isArray(cloudData.users)) setUsers(sanitizeUsersList(cloudData.users));
-            if (Array.isArray(cloudData.loans)) setLoans(cloudData.loans);
-            if (Array.isArray(cloudData.auditLogs)) setAuditLogs(cloudData.auditLogs);
-            if (cloudData.rolePermissions) setRolePermissions(cloudData.rolePermissions);
-            if (cloudData.dashboardConfig) setDashboardConfig(cloudData.dashboardConfig);
+            applySafeCloudData(cloudData);
+            setOfflineQueueLength(getOfflineQueueCount());
           }
         }).catch(() => {});
       }
@@ -630,14 +685,10 @@ export default function App() {
     window.addEventListener('online', triggerSyncRefresh);
     window.addEventListener('focus', triggerSyncRefresh);
 
-    // Active heartbeat every 4 seconds for instantaneous multi-device background update
-    const heartbeatInterval = setInterval(triggerSyncRefresh, 4000);
-
     return () => {
       document.removeEventListener('visibilitychange', triggerSyncRefresh);
       window.removeEventListener('online', triggerSyncRefresh);
       window.removeEventListener('focus', triggerSyncRefresh);
-      clearInterval(heartbeatInterval);
     };
   }, []);
 
@@ -931,8 +982,12 @@ export default function App() {
     const nextTrx = [finalTrx, ...transactions];
     setTransactions(nextTrx);
 
+    // Save permanently to local ledger immediately (never lost even if device drops offline)
+    saveToLocalLedger(finalTrx);
+
     // Broadcast immediately to Firestore so other phones/devices see it instantly!
     syncToCloud({ items: nextItems, transactions: nextTrx });
+    setOfflineQueueLength(getOfflineQueueCount());
 
     if (finalTrx.type === 'OUT') {
       logAudit(
@@ -1078,13 +1133,25 @@ export default function App() {
       setItems(nextItems);
     }
 
+    // Record tombstone and remove from permanent local ledger so it can NEVER reappear
+    recordDeletedTransactionId(transactionId, trxToDelete.transactionNumber);
+    removeFromLocalLedger(transactionId, trxToDelete.transactionNumber);
+    const nextDeletedIds = getDeletedTransactionIds();
+    setDeletedTransactionIds(nextDeletedIds);
+
     const nextTrx = transactions.filter((t) => t.id !== transactionId);
     setTransactions(nextTrx);
-    syncToCloud({ items: nextItems, transactions: nextTrx });
+    try {
+      localStorage.setItem(STORAGE_KEY_TRANSACTIONS, JSON.stringify(nextTrx));
+    } catch (e) {
+      console.error(e);
+    }
+
+    syncToCloud({ items: nextItems, transactions: nextTrx, deletedTransactionIds: nextDeletedIds });
 
     logAudit('Hapus Transaksi', 'TRANSACTIONS', `Menghapus log transaksi ${trxToDelete.transactionNumber}${revertStock ? ' dengan rollback stok' : ''}`);
     showToast(
-      `Transaksi [${trxToDelete.transactionNumber}] berhasil dihapus${revertStock ? ' dan stok dipulihkan' : ''}.`,
+      `Transaksi [${trxToDelete.transactionNumber}] berhasil dihapus permanen${revertStock ? ' dan stok dipulihkan' : ''}.`,
       'warning'
     );
   };
@@ -1143,13 +1210,22 @@ export default function App() {
       }
     }
 
+    // Record tombstones for all cleared transactions
+    const removedTrx = transactions.filter((t) => !nextTrx.some((nt) => nt.id === t.id));
+    removedTrx.forEach((t) => {
+      recordDeletedTransactionId(t.id, t.transactionNumber);
+      removeFromLocalLedger(t.id, t.transactionNumber);
+    });
+    const nextDeletedIds = getDeletedTransactionIds();
+    setDeletedTransactionIds(nextDeletedIds);
+
     setTransactions(nextTrx);
     try {
       localStorage.setItem(STORAGE_KEY_TRANSACTIONS, JSON.stringify(nextTrx));
     } catch (e) {
       console.error(e);
     }
-    syncToCloud({ transactions: nextTrx });
+    syncToCloud({ transactions: nextTrx, deletedTransactionIds: nextDeletedIds });
     logAudit(
       'Bersihkan Riwayat Transaksi',
       'TRANSACTIONS',
@@ -1264,6 +1340,8 @@ export default function App() {
 
   // Reset all sample data to default
   const handleResetSampleData = () => {
+    clearDeletedTransactionIds();
+    setDeletedTransactionIds([]);
     setItems(INITIAL_ITEMS);
     setTransactions(INITIAL_TRANSACTIONS);
     setEmployees(INITIAL_EMPLOYEES);
@@ -1283,6 +1361,7 @@ export default function App() {
     syncToCloud({
       items: INITIAL_ITEMS,
       transactions: INITIAL_TRANSACTIONS,
+      deletedTransactionIds: [],
       employees: INITIAL_EMPLOYEES,
       users: INITIAL_USERS,
       loans: INITIAL_LOANS,
@@ -1393,6 +1472,18 @@ export default function App() {
                       </span>
                       <RefreshCw className={`w-2.5 h-2.5 opacity-75 ml-0.5 ${syncState === 'syncing' ? 'animate-spin' : ''}`} />
                     </button>
+                    {offlineQueueLength > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleManualRefreshCloud}
+                        title={`${offlineQueueLength} transaksi/data tersimpan di memori lokal saat offline. Klik untuk mengunggah ke Cloud sekarang!`}
+                        className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 bg-amber-500/30 text-amber-200 border-amber-400/50 animate-pulse cursor-pointer hover:bg-amber-500/40"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        <span>{offlineQueueLength} Tertunda</span>
+                        <RefreshCw className="w-2.5 h-2.5 ml-0.5" />
+                      </button>
+                    )}
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-300/90 font-medium hidden md:block truncate">
                     {dashboardConfig.companySubtitle || 'General Affairs Inventory & Barcode Control System'}

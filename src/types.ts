@@ -65,7 +65,9 @@ export type Category =
   | 'Peralatan & Aset Kantor'
   | 'Mess Manager & Resident'
   | 'Alat & Perlengkapan Olahraga'
+  | 'Alat & Perlengkapan Olah Raga'
   | 'Alat & Kelengkapan Elektrik'
+  | 'Alat & Kelengkapan Electric'
   | 'Material Bangunan';
 
 export type Department =

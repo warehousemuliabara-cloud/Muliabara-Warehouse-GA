@@ -419,7 +419,9 @@ export const CATEGORIES = [
   'Maintenance & Perkakas',
   'Mess Manager & Resident',
   'Alat & Perlengkapan Olahraga',
+  'Alat & Perlengkapan Olah Raga',
   'Alat & Kelengkapan Elektrik',
+  'Alat & Kelengkapan Electric',
   'Material Bangunan',
 ];
 

@@ -4,21 +4,17 @@ import {
   Check, 
   X, 
   CheckCircle2, 
-  XCircle, 
   Clock, 
   AlertTriangle, 
-  FileText, 
-  User, 
-  Building2, 
-  Package, 
-  ShieldCheck, 
-  Sparkles,
-  ArrowUpRight,
+  Calendar,
+  Volume2,
   ChevronLeft,
   ChevronRight,
-  Calendar
+  ArrowUpRight,
+  Sparkles
 } from 'lucide-react';
 import { Transaction, UserAccount } from '../types';
+import { playNotificationChime, triggerBrowserNotification } from '../utils/helpers';
 
 interface NotificationApprovalModalProps {
   isOpen: boolean;
@@ -29,6 +25,24 @@ interface NotificationApprovalModalProps {
   onReject: (trxId: string, notes?: string) => void;
   onNavigateToRequest?: () => void;
 }
+
+const getNormalizedDateStr = (dateVal?: string): string => {
+  if (!dateVal) return '';
+  const clean = dateVal.split('T')[0].split(' ')[0];
+  if (clean.length === 10 && clean.includes('-')) return clean;
+  try {
+    const d = new Date(dateVal);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  } catch {
+    // fallback
+  }
+  return clean;
+};
 
 export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps> = ({
   isOpen,
@@ -41,27 +55,36 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
 }) => {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectionNotes, setRejectionNotes] = useState('');
+  const [viewMode, setViewMode] = useState<'PENDING_ALL' | 'BY_DATE'>('PENDING_ALL');
+  const [audioPlayed, setAudioPlayed] = useState(false);
 
-  // -------------------------------------------------------------
-  // Requirement 8: Limit approval notification display to 1 date only,
-  // then navigate to next/previous day
-  // -------------------------------------------------------------
+  // All pending requests across all dates (never hidden)
+  const allPendingRequests = useMemo(() => {
+    return transactions
+      .filter((t) => t.type === 'OUT' && t.status === 'PENDING')
+      .sort((a, b) => new Date(b.date || b.timestamp || 0).getTime() - new Date(a.date || a.timestamp || 0).getTime());
+  }, [transactions]);
+
+  // Unique request dates for calendar-based navigation
   const uniqueRequestDates = useMemo(() => {
     const datesSet = new Set<string>();
     transactions.forEach((t) => {
-      if (t.type === 'OUT' && t.date) {
-        datesSet.add(t.date);
+      if (t.type === 'OUT') {
+        const d = getNormalizedDateStr(t.date || t.timestamp);
+        if (d && d.length === 10) {
+          datesSet.add(d);
+        }
       }
     });
-    const sorted = Array.from(datesSet).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    if (sorted.length === 0) {
-      sorted.push(new Date().toISOString().split('T')[0]);
-    }
-    return sorted;
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    datesSet.add(todayLocal);
+
+    return Array.from(datesSet).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
   }, [transactions]);
 
   const [selectedDateIdx, setSelectedDateIdx] = useState<number>(0);
-  const activeDate = uniqueRequestDates[selectedDateIdx] || uniqueRequestDates[0] || new Date().toISOString().split('T')[0];
+  const activeDate = uniqueRequestDates[selectedDateIdx] || uniqueRequestDates[0] || getNormalizedDateStr(new Date().toISOString());
 
   const formatDisplayDate = (dateStr: string) => {
     try {
@@ -82,25 +105,24 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
   // Pending on selected date
   const pendingRequestsOnDate = useMemo(() => {
     return transactions
-      .filter((t) => t.type === 'OUT' && t.status === 'PENDING' && t.date === activeDate)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .filter((t) => {
+        if (t.type !== 'OUT' || t.status !== 'PENDING') return false;
+        const d = getNormalizedDateStr(t.date || t.timestamp);
+        return d === activeDate;
+      })
+      .sort((a, b) => new Date(b.date || b.timestamp || 0).getTime() - new Date(a.date || a.timestamp || 0).getTime());
   }, [transactions, activeDate]);
-
-  // All pending requests across all dates (for badge counter)
-  const totalPendingAcrossAllDates = useMemo(() => {
-    return transactions.filter((t) => t.type === 'OUT' && t.status === 'PENDING').length;
-  }, [transactions]);
 
   // Resolved on selected date
   const resolvedOnDate = useMemo(() => {
     return transactions
-      .filter(
-        (t) =>
-          t.type === 'OUT' &&
-          (t.status === 'APPROVED' || t.status === 'REJECTED' || t.status === 'COMPLETED') &&
-          t.date === activeDate
-      )
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .filter((t) => {
+        if (t.type !== 'OUT') return false;
+        if (t.status !== 'APPROVED' && t.status !== 'REJECTED' && t.status !== 'COMPLETED') return false;
+        const d = getNormalizedDateStr(t.date || t.timestamp);
+        return d === activeDate;
+      })
+      .sort((a, b) => new Date(b.date || b.timestamp || 0).getTime() - new Date(a.date || a.timestamp || 0).getTime());
   }, [transactions, activeDate]);
 
   if (!isOpen) return null;
@@ -111,9 +133,25 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
     setRejectionNotes('');
   };
 
+  const handleTestChime = () => {
+    playNotificationChime();
+    setAudioPlayed(true);
+    setTimeout(() => setAudioPlayed(false), 2000);
+  };
+
+  const handleEnableDesktopNotif = () => {
+    playNotificationChime();
+    triggerBrowserNotification(
+      '🔔 Notifikasi Gudang Aktif',
+      'Pemberitahuan transaksi real-time berhasil diaktifkan pada peramban ini.'
+    );
+  };
+
+  const displayedPending = viewMode === 'PENDING_ALL' ? allPendingRequests : pendingRequestsOnDate;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+      <div className="bg-white rounded-2xl w-full max-w-xl max-h-[88vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
         {/* Header with Glossy Badge */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-4 px-5 flex items-center justify-between border-b border-slate-700">
           <div className="flex items-center gap-3">
@@ -123,15 +161,15 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
             <div>
               <h3 className="text-base font-black text-white flex items-center gap-2">
                 <span>Pemberitahuan & Approval Permintaan</span>
-                {totalPendingAcrossAllDates > 0 && (
+                {allPendingRequests.length > 0 && (
                   <span className="px-2 py-0.5 bg-rose-500 text-white text-[11px] font-mono font-bold rounded-full animate-pulse shadow-xs">
-                    {totalPendingAcrossAllDates} Total Menunggu
+                    {allPendingRequests.length} Menunggu
                   </span>
                 )}
               </h3>
               <p className="text-xs text-slate-300">
                 {canApprove 
-                  ? 'Verifikasi persetujuan pengeluaran barang per tanggal'
+                  ? 'Verifikasi persetujuan pengeluaran barang mandiri & divisi'
                   : 'Status pembaruan pengajuan barang divisi'}
               </p>
             </div>
@@ -140,74 +178,135 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Date Navigator Bar (Requirement 8: 1 Tanggal per Tampilan) */}
-        <div className="bg-slate-100 p-2.5 px-4 border-b border-slate-200 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-            <Calendar className="w-4 h-4 text-blue-600" />
-            <span className="text-slate-900 font-extrabold">{formatDisplayDate(activeDate)}</span>
-          </div>
-
+        {/* View Mode Tabs & Audio/Notification Controls */}
+        <div className="bg-slate-100 p-2.5 px-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          {/* Tab Selector */}
           <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
             <button
               type="button"
-              onClick={() => setSelectedDateIdx((prev) => Math.min(uniqueRequestDates.length - 1, prev + 1))}
-              disabled={selectedDateIdx >= uniqueRequestDates.length - 1}
-              title="Tanggal Sebelumnya"
-              className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-30 text-slate-600 cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => setViewMode('PENDING_ALL')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                viewMode === 'PENDING_ALL'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
             >
-              <ChevronLeft className="w-4 h-4" />
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Semua Pending ({allPendingRequests.length})</span>
             </button>
-            <span className="text-[10px] font-mono font-bold text-slate-500 px-1">
-              {selectedDateIdx + 1} / {uniqueRequestDates.length}
-            </span>
+
             <button
               type="button"
-              onClick={() => setSelectedDateIdx((prev) => Math.max(0, prev - 1))}
-              disabled={selectedDateIdx <= 0}
-              title="Tanggal Berikutnya"
-              className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-30 text-slate-600 cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => setViewMode('BY_DATE')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                viewMode === 'BY_DATE'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
             >
-              <ChevronRight className="w-4 h-4" />
+              <Calendar className="w-3.5 h-3.5 text-blue-400" />
+              <span>Per Tanggal</span>
+            </button>
+          </div>
+
+          {/* Audio Chime & Browser Notification Test */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleTestChime}
+              title="Uji bunyi bel notifikasi"
+              className="px-2.5 py-1 text-[11px] font-bold bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 rounded-lg flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Volume2 className={`w-3.5 h-3.5 text-amber-600 ${audioPlayed ? 'animate-bounce' : ''}`} />
+              <span>{audioPlayed ? 'Berbunyi!' : 'Tes Suara'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleEnableDesktopNotif}
+              title="Aktifkan notifikasi desktop browser"
+              className="px-2.5 py-1 text-[11px] font-bold bg-white hover:bg-blue-50 text-blue-800 border border-blue-300 rounded-lg flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Bell className="w-3.5 h-3.5 text-blue-600" />
+              <span>Izin Notif</span>
             </button>
           </div>
         </div>
 
+        {/* Date Navigator Bar (Shown when viewMode === 'BY_DATE') */}
+        {viewMode === 'BY_DATE' && (
+          <div className="bg-slate-50 p-2.5 px-4 border-b border-slate-200 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              <span className="text-slate-900 font-extrabold">{formatDisplayDate(activeDate)}</span>
+            </div>
+
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setSelectedDateIdx((prev) => Math.min(uniqueRequestDates.length - 1, prev + 1))}
+                disabled={selectedDateIdx >= uniqueRequestDates.length - 1}
+                title="Tanggal Sebelumnya"
+                className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-30 text-slate-600 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-[10px] font-mono font-bold text-slate-500 px-1">
+                {selectedDateIdx + 1} / {uniqueRequestDates.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedDateIdx((prev) => Math.max(0, prev - 1))}
+                disabled={selectedDateIdx <= 0}
+                title="Tanggal Berikutnya"
+                className="p-1 rounded-lg hover:bg-slate-100 disabled:opacity-30 text-slate-600 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Pending Section for Selected Date */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          {/* Pending Section */}
           <div>
             <div className="flex items-center justify-between mb-2.5">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-600" />
-                <span>Permintaan Menunggu Persetujuan ({pendingRequestsOnDate.length})</span>
+                <span>
+                  {viewMode === 'PENDING_ALL' 
+                    ? `Semua Permintaan Menunggu Persetujuan (${displayedPending.length})` 
+                    : `Permintaan Menunggu pada ${activeDate} (${displayedPending.length})`}
+                </span>
               </h4>
             </div>
 
-            {pendingRequestsOnDate.length === 0 ? (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-center text-slate-500 text-xs">
-                <CheckCircle2 className="w-7 h-7 text-emerald-500 mx-auto mb-1.5" />
-                <p className="font-bold text-slate-700">Tidak ada antrian persetujuan pada tanggal ini</p>
+            {displayedPending.length === 0 ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center text-slate-500 text-xs">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                <p className="font-bold text-slate-700 text-sm">Semua Permintaan Sudah Diproses!</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Gunakan tombol panah di atas untuk melihat tanggal lain atau seluruh riwayat.
+                  Tidak ada permintaan barang yang sedang menunggu verifikasi Admin saat ini.
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
-                {pendingRequestsOnDate.map((req) => (
+                {displayedPending.map((req) => (
                   <div
                     key={req.id}
                     className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 space-y-2.5 shadow-2xs"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-xs bg-white text-slate-900 px-2 py-0.5 rounded border border-amber-300">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-xs bg-white text-slate-900 px-2 py-0.5 rounded border border-amber-300 shadow-2xs">
                             {req.transactionNumber}
                           </span>
                           <span className="text-xs font-bold text-slate-900">
@@ -218,30 +317,45 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 mt-1">
-                          <b>Keperluan:</b> {req.purposeDescription || '-'}
+                          <span className="font-semibold">Keperluan:</span> {req.purposeDescription || '-'}
                         </p>
-                        <div className="text-[11px] font-mono text-slate-700 bg-white/80 p-1.5 rounded mt-1.5 border border-amber-200/80">
-                          {req.items.map((i) => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ')}
+                        <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                          {req.dateFormatted || req.date?.substring(0, 10)} {req.timeFormatted ? `• ${req.timeFormatted}` : ''}
                         </div>
                       </div>
 
-                      <div className="text-right text-[11px] text-slate-400 shrink-0">
-                        {req.timeFormatted}
-                      </div>
+                      <span className="px-2.5 py-1 bg-amber-200 text-amber-900 rounded-full font-bold text-[10px] uppercase shrink-0 border border-amber-300">
+                        Menunggu
+                      </span>
                     </div>
 
-                    {/* Rejecting reason input box */}
+                    {/* Items table */}
+                    <div className="bg-white/80 rounded-lg p-2 border border-amber-100 text-xs space-y-1">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Daftar Barang Diminta:
+                      </div>
+                      {req.items.map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-slate-700 font-medium text-xs">
+                          <span>• {item.itemName}</span>
+                          <span className="font-bold font-mono text-slate-900">
+                            {item.quantity} {item.unit}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Reject Input if active */}
                     {rejectingId === req.id && (
-                      <div className="pt-2 border-t border-amber-200/80 space-y-2">
-                        <label className="block text-[11px] font-bold text-slate-700">
+                      <div className="p-3 bg-white rounded-xl border border-rose-200 space-y-2 animate-in fade-in duration-150">
+                        <label className="text-xs font-bold text-rose-700 block">
                           Alasan Penolakan:
                         </label>
                         <input
                           type="text"
                           value={rejectionNotes}
                           onChange={(e) => setRejectionNotes(e.target.value)}
-                          placeholder="Misal: Stok dialokasikan untuk operasional darurat..."
-                          className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+                          placeholder="Misal: Stok dialokasikan untuk kebutuhan lain..."
+                          className="w-full text-xs p-2 border border-rose-300 rounded-lg focus:outline-rose-500"
                         />
                         <div className="flex justify-end gap-2">
                           <button
@@ -300,11 +414,11 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
             )}
           </div>
 
-          {/* Recent Resolved Activity for Selected Date */}
-          {resolvedOnDate.length > 0 && (
+          {/* Recent Resolved Activity for Selected Date (When in BY_DATE mode) */}
+          {viewMode === 'BY_DATE' && resolvedOnDate.length > 0 && (
             <div className="border-t border-slate-100 pt-4">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                Riwayat Verifikasi Tanggal Ini ({resolvedOnDate.length})
+                Riwayat Verifikasi Tanggal {activeDate} ({resolvedOnDate.length})
               </h4>
               <div className="space-y-2">
                 {resolvedOnDate.map((trx) => (
@@ -357,7 +471,7 @@ export const NotificationApprovalModal: React.FC<NotificationApprovalModalProps>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl ml-auto cursor-pointer"
+            className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl ml-auto cursor-pointer transition-colors"
           >
             Tutup
           </button>

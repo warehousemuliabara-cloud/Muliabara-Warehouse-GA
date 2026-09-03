@@ -32,6 +32,53 @@ export const LoginView: React.FC<LoginViewProps> = ({
   onLoginSuccess,
   onGoToRequestPortal,
 }) => {
+  // Synchronize dashboardConfig branding (Logo, Name, Subtitle) so login matches dashboard exactly
+  const [currentLogoUrl, setCurrentLogoUrl] = useState<string | null>(() => {
+    if (logoUrl) return logoUrl;
+    try {
+      const savedConfig = localStorage.getItem('ga_warehouse_config_v8');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        return parsed.logoUrl || null;
+      }
+    } catch {}
+    return null;
+  });
+
+  const [currentAppName, setCurrentAppName] = useState<string>(() => {
+    try {
+      const savedConfig = localStorage.getItem('ga_warehouse_config_v8');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        return parsed.appName || appName;
+      }
+    } catch {}
+    return appName;
+  });
+
+  const [currentSubtitle, setCurrentSubtitle] = useState<string>(() => {
+    try {
+      const savedConfig = localStorage.getItem('ga_warehouse_config_v8');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        return parsed.companySubtitle || companySubtitle;
+      }
+    } catch {}
+    return companySubtitle;
+  });
+
+  useEffect(() => {
+    if (logoUrl !== undefined) setCurrentLogoUrl(logoUrl);
+  }, [logoUrl]);
+
+  useEffect(() => {
+    if (appName) setCurrentAppName(appName);
+  }, [appName]);
+
+  useEffect(() => {
+    if (companySubtitle) setCurrentSubtitle(companySubtitle);
+  }, [companySubtitle]);
+
   // Validate and clean user list while respecting user deletions
   const sanitizeUsersList = (savedList: any): UserAccount[] => {
     if (Array.isArray(savedList) && savedList.length > 0) {
@@ -67,7 +114,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }
   }, [users, userAccounts]);
 
-  // Real-time listener for user accounts from Firestore in LoginView
+  // Real-time listener for user accounts and dashboard config (including logo) from Firestore in LoginView
   useEffect(() => {
     const unsubscribe = subscribeToWarehouseData((data) => {
       if (data && data.users && Array.isArray(data.users) && data.users.length > 0) {
@@ -77,6 +124,17 @@ export const LoginView: React.FC<LoginViewProps> = ({
           localStorage.setItem('ga_warehouse_users_v8', JSON.stringify(sanitized));
         } catch {
           // ignore
+        }
+      }
+      if (data && data.dashboardConfig) {
+        if (data.dashboardConfig.logoUrl !== undefined) {
+          setCurrentLogoUrl(data.dashboardConfig.logoUrl);
+        }
+        if (data.dashboardConfig.appName) {
+          setCurrentAppName(data.dashboardConfig.appName);
+        }
+        if (data.dashboardConfig.companySubtitle) {
+          setCurrentSubtitle(data.dashboardConfig.companySubtitle);
         }
       }
     });
@@ -223,24 +281,26 @@ export const LoginView: React.FC<LoginViewProps> = ({
         
         {/* Brand Header */}
         <div className="flex flex-col items-center justify-center mb-6">
-          <div className="mb-3 flex items-center justify-center">
-            <CompanyLogo
-              logoUrl={logoUrl}
-              companyName={appName}
-              className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shadow-lg ring-1 ring-white/20 object-contain bg-slate-900/60 p-1.5"
-            />
+          <div className="mb-3.5 flex items-center justify-center">
+            <div className="relative p-1.5 sm:p-2 rounded-2xl bg-gradient-to-b from-white/20 via-white/10 to-transparent shadow-xl shadow-black/30 ring-1 ring-white/25 group-hover:scale-105 transition-all">
+              <CompanyLogo
+                logoUrl={currentLogoUrl}
+                companyName={currentAppName}
+                size="lg"
+              />
+            </div>
           </div>
           
           <div className="flex items-center justify-center gap-2">
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight text-center">
-              {appName}
+              {currentAppName}
             </h1>
             <span className="text-[10px] font-black bg-blue-500/25 text-blue-300 border border-blue-400/30 px-1.5 py-0.2 rounded font-mono shadow-xs">
               PRO
             </span>
           </div>
           <p className="text-xs text-slate-400 font-medium mt-1.5 text-center max-w-[340px]">
-            {companySubtitle}
+            {currentSubtitle}
           </p>
         </div>
 

@@ -127,10 +127,14 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
   const selectedItemObj = items.find((i) => i.id === selectedItemId);
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  // Filtered item list for Searchable Combobox
+  // Filtered item list for Searchable Combobox with full scrolling
   const filteredItemChoices = items.filter((it) => {
     const term = itemSearchKeyword.toLowerCase().trim();
     if (!term) return true;
+    // If the keyword exactly matches current selected item, still show all items so user can scroll & pick another
+    if (selectedItemObj && term === `${selectedItemObj.name} (${selectedItemObj.code})`.toLowerCase()) {
+      return true;
+    }
     return (
       it.name.toLowerCase().includes(term) ||
       it.code.toLowerCase().includes(term) ||
@@ -139,9 +143,9 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
     );
   });
 
-  // Filtered employee list for Searchable Combobox
+  // Filtered employee list for Searchable Combobox with full scrolling
   const filteredEmployeeChoices = employees.filter((emp) => {
-    const term = employeeSearchKeyword.toLowerCase().trim();
+    const term = (employeeSearchKeyword || borrowerName).toLowerCase().trim();
     if (!term) return true;
     return (
       emp.name.toLowerCase().includes(term) ||
@@ -835,7 +839,11 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
 
                 {/* Dropdown Menu (Scrollable List) */}
                 {isItemDropdownOpen && (
-                  <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-slate-300 rounded-xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100">
+                  <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-slate-300 rounded-xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100">
+                    <div className="px-3 py-1.5 bg-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200 flex items-center justify-between">
+                      <span>Daftar Barang ({filteredItemChoices.length})</span>
+                      <span className="text-[9px] text-slate-400 font-normal">Scroll ke bawah untuk memilih</span>
+                    </div>
                     {filteredItemChoices.length === 0 ? (
                       <div className="p-3 text-center text-xs text-slate-500 font-medium">
                         Tidak ada barang yang cocok dengan kata kunci "{itemSearchKeyword}".
@@ -873,9 +881,9 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                             <div className="text-right shrink-0">
                               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                                 isOutOfStock 
-                                  ? 'bg-rose-100 text-rose-700' 
-                                  : 'bg-emerald-100 text-emerald-800'
-                              }`}>
+                                ? 'bg-rose-100 text-rose-700' 
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}>
                                 {isOutOfStock ? 'Habis (0)' : `Stok: ${it.currentStock} ${it.unit}`}
                               </span>
                             </div>
@@ -911,39 +919,45 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                 </div>
               </div>
 
-              {/* Quick Pick Employee & Borrower Information (Searchable & Scrollable) */}
-              <div className="p-3.5 bg-[#E8F5E9]/50 rounded-xl border border-[#A5D6A7] space-y-2.5">
+              {/* Data Peminjam (Searchable Combobox & Scrollable List) */}
+              <div className="p-3.5 bg-[#E8F5E9]/50 rounded-xl border border-[#A5D6A7] space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold uppercase text-[#1B5E20]">Data Peminjam</span>
-                  <span className="text-[10px] text-slate-500 font-medium">Cari dari {employees.length} data personil</span>
+                  <span className="text-[10px] text-slate-500 font-medium">Bisa diketik manual atau dipilih dari daftar</span>
                 </div>
 
-                {/* Searchable Combobox for Employee */}
+                {/* Primary Searchable Borrower Field */}
                 <div className="relative" ref={employeeDropdownRef}>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Nama Peminjam <span className="text-rose-500">*</span>
+                  </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
                       <Search className="w-3.5 h-3.5" />
                     </div>
                     <input
                       type="text"
-                      value={employeeSearchKeyword}
+                      required
+                      value={borrowerName}
                       onFocus={() => setIsEmployeeDropdownOpen(true)}
                       onChange={(e) => {
-                        setEmployeeSearchKeyword(e.target.value);
                         setBorrowerName(e.target.value);
+                        setEmployeeSearchKeyword(e.target.value);
                         setIsEmployeeDropdownOpen(true);
                       }}
-                      placeholder="-- Ketik nama peminjam / pilih karyawan --"
-                      className="w-full pl-8 pr-8 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium text-slate-800 focus:ring-2 focus:ring-[#66BB6A]"
+                      placeholder="Ketik nama peminjam / cari dari daftar karyawan..."
+                      className="w-full pl-8 pr-8 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-[#66BB6A]"
                     />
-                    {employeeSearchKeyword ? (
+                    {borrowerName ? (
                       <button
                         type="button"
                         onClick={() => {
-                          setEmployeeSearchKeyword('');
                           setBorrowerName('');
+                          setEmployeeSearchKeyword('');
+                          setBorrowerPosition('');
+                          setBorrowerPhone('');
                         }}
-                        className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -951,19 +965,35 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsEmployeeDropdownOpen(!isEmployeeDropdownOpen)}
-                        className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600"
+                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
                       >
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
 
-                  {/* Employee Dropdown List */}
+                  {/* Employee Dropdown List (Scrollable) */}
                   {isEmployeeDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-slate-300 rounded-xl shadow-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-slate-300 rounded-xl shadow-xl max-h-56 overflow-y-auto divide-y divide-slate-100">
+                      <div className="px-3 py-1.5 bg-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-wider sticky top-0 z-10 border-b border-slate-200 flex items-center justify-between">
+                        <span>Daftar Personil ({filteredEmployeeChoices.length})</span>
+                        <span className="text-[9px] text-slate-400 font-normal">Scroll ke bawah untuk memilih</span>
+                      </div>
+
+                      {borrowerName.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setIsEmployeeDropdownOpen(false)}
+                          className="w-full text-left px-3 py-2 text-xs bg-emerald-50 text-emerald-800 font-bold hover:bg-emerald-100 flex items-center gap-1.5"
+                        >
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Gunakan nama: "{borrowerName}" (Ketik Manual)</span>
+                        </button>
+                      )}
+
                       {filteredEmployeeChoices.length === 0 ? (
                         <div className="p-3 text-center text-xs text-slate-500">
-                          <span>Tidak ditemukan karyawan. Anda dapat mengetik nama manual di bawah.</span>
+                          <span>Tidak ada personil yang sesuai. Nama "{borrowerName}" tetap tersimpan sebagai peminjam.</span>
                         </div>
                       ) : (
                         filteredEmployeeChoices.map((e) => (
@@ -975,7 +1005,7 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                               setBorrowerPosition(e.position || '');
                               if (e.department) setBorrowerDept(e.department);
                               if (e.phone) setBorrowerPhone(e.phone);
-                              setEmployeeSearchKeyword(`${e.name} — ${e.position || 'Staf'} (${e.department || 'Kantor'})`);
+                              setEmployeeSearchKeyword(e.name);
                               setIsEmployeeDropdownOpen(false);
                             }}
                             className="w-full text-left px-3 py-2 text-xs hover:bg-[#E8F5E9] hover:text-[#1B5E20] transition-colors flex items-center justify-between"
@@ -996,34 +1026,18 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Nama Lengkap Peminjam <span className="text-rose-500">*</span></label>
-                    <input
-                      type="text"
-                      required
-                      value={borrowerName}
-                      onChange={(e) => {
-                        setBorrowerName(e.target.value);
-                        setEmployeeSearchKeyword(e.target.value);
-                      }}
-                      placeholder="Nama Peminjam"
-                      className="w-full px-3 py-1.5 text-xs font-bold uppercase border border-slate-300 rounded-lg bg-white"
-                    />
-                  </div>
+                {/* Secondary details */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Jabatan / Posisi</label>
                     <input
                       type="text"
                       value={borrowerPosition}
                       onChange={(e) => setBorrowerPosition(e.target.value)}
-                      placeholder="Jabatan"
-                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white uppercase"
+                      placeholder="Contoh: Staf GA"
+                      className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white uppercase font-medium"
                     />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Divisi / Departemen</label>
                     <select
@@ -1049,8 +1063,8 @@ export const ItemLoanView: React.FC<ItemLoanViewProps> = ({
                 </div>
               </div>
 
-              {/* Dates - Sejajar (Aligned horizontally) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Dates - Sejajar (Aligned horizontally side-by-side) */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Tanggal Pinjam <span className="text-rose-500">*</span>

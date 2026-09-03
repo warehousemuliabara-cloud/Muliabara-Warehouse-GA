@@ -949,14 +949,14 @@ export const ItemMasterView: React.FC<ItemMasterViewProps> = ({
                         >
                           <div className="flex items-center gap-1.5 truncate">
                             <PlusCircle className="w-4 h-4 text-emerald-600 group-hover:text-white shrink-0" />
-                            <span className="truncate">
+                            <span className="truncate font-bold">
                               {formName.trim()
-                                ? `+ Ketik Nama Barang Baru: "${formName}" (Ketik Manual)`
-                                : `+ Ketik Nama Barang Baru (Ketik Manual)`}
+                                ? `+ Ketik Nama Barang Baru "${formName}" (ketik Manual)`
+                                : `+ Ketik Nama Barang Baru (ketik Manual)`}
                             </span>
                           </div>
                           <span className="text-[10px] bg-emerald-100 group-hover:bg-emerald-700 group-hover:text-white text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold shrink-0 ml-2">
-                            Manual
+                            Ketik Manual
                           </span>
                         </button>
                       </div>
